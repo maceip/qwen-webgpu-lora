@@ -149,6 +149,7 @@ export class QwenWGPU {
       const w = this._buf(wBytes);
       const scale = this._buf(scaleBytes);
       const bias = this._buf(biasBytes);
+      enc.clearBuffer(bias);
       let wOff = 0, sOff = 0, bOff = 0;
       for (const part of [L.q, L.k, L.v]) {
         const qq = this.q4[part.weight];
