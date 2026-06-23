@@ -7880,12 +7880,12 @@ async function createInferenceSession(buffer_or_path, session_options, session_c
     logSeverityLevel,
     ...session_options
   });
-  const session = await (apis.IS_WEB_ENV ? webInitChain = webInitChain.then(load) : load());
-  session.config = session_config;
-  return session;
+  const session2 = await (apis.IS_WEB_ENV ? webInitChain = webInitChain.then(load) : load());
+  session2.config = session_config;
+  return session2;
 }
-async function runInferenceSession(session, ortFeed) {
-  const run = () => session.run(ortFeed);
+async function runInferenceSession(session2, ortFeed) {
+  const run = () => session2.run(ortFeed);
   return apis.IS_WEB_ENV ? webInferenceChain = webInferenceChain.then(run) : run();
 }
 function isONNXTensor(x) {
@@ -8418,9 +8418,9 @@ function getTokenFromConfig(config, ...keys) {
   }
   return null;
 }
-function getSpecialTokens(tokenizer2) {
+function getSpecialTokens(tokenizer) {
   const special = [];
-  for (const value of tokenizer2.get_added_tokens_decoder().values()) {
+  for (const value of tokenizer.get_added_tokens_decoder().values()) {
     if (value.special) special.push(value);
   }
   return special;
@@ -9912,8 +9912,8 @@ async function constructSessions(pretrained_model_name_or_path, names, options, 
           cache_config,
           name
         );
-        const session = await createInferenceSession(buffer_or_path, session_options, session_config);
-        return [name, session];
+        const session2 = await createInferenceSession(buffer_or_path, session_options, session_config);
+        return [name, session2];
       })
     )
   );
@@ -9928,8 +9928,8 @@ function replaceTensors(obj) {
   }
   return obj;
 }
-async function sessionRun(session, inputs) {
-  const checkedInputs = validateInputs(session, inputs);
+async function sessionRun(session2, inputs) {
+  const checkedInputs = validateInputs(session2, inputs);
   try {
     const ortFeed = Object.fromEntries(
       Object.entries(checkedInputs).map(([k2, v]) => {
@@ -9945,7 +9945,7 @@ async function sessionRun(session, inputs) {
         return [k2, tensor];
       })
     );
-    const output = await runInferenceSession(session, ortFeed);
+    const output = await runInferenceSession(session2, ortFeed);
     return replaceTensors(output);
   } catch (e) {
     const formatted = Object.fromEntries(
@@ -9966,10 +9966,10 @@ async function sessionRun(session, inputs) {
     throw e;
   }
 }
-function validateInputs(session, inputs) {
+function validateInputs(session2, inputs) {
   const checkedInputs = /* @__PURE__ */ Object.create(null);
   const missingInputs = [];
-  for (const inputName of session.inputNames) {
+  for (const inputName of session2.inputNames) {
     const tensor = inputs[inputName];
     if (!(tensor instanceof Tensor22)) {
       missingInputs.push(inputName);
@@ -9983,9 +9983,9 @@ function validateInputs(session, inputs) {
     );
   }
   const numInputsProvided = Object.keys(inputs).length;
-  const numInputsNeeded = session.inputNames.length;
+  const numInputsNeeded = session2.inputNames.length;
   if (numInputsProvided > numInputsNeeded) {
-    let ignored = Object.keys(inputs).filter((inputName) => !session.inputNames.includes(inputName));
+    let ignored = Object.keys(inputs).filter((inputName) => !session2.inputNames.includes(inputName));
     logger.warn(
       `WARNING: Too many inputs were provided (${numInputsProvided} > ${numInputsNeeded}). The following inputs will be ignored: "${ignored.join(", ")}".`
     );
@@ -10143,28 +10143,28 @@ async function seq2seq_forward(self2, model_inputs) {
   return await decoder_forward(self2, other_decoder_inputs, true);
 }
 async function encoder_forward(self2, model_inputs) {
-  const session = self2.sessions["model"];
-  const encoderFeeds = pick(model_inputs, session.inputNames);
-  if (session.inputNames.includes("inputs_embeds") && !encoderFeeds.inputs_embeds) {
+  const session2 = self2.sessions["model"];
+  const encoderFeeds = pick(model_inputs, session2.inputNames);
+  if (session2.inputNames.includes("inputs_embeds") && !encoderFeeds.inputs_embeds) {
     if (!model_inputs.input_ids) {
       throw new Error("Both `input_ids` and `inputs_embeds` are missing in the model inputs.");
     }
     encoderFeeds.inputs_embeds = await self2.encode_text({ input_ids: model_inputs.input_ids });
   }
-  if (session.inputNames.includes("token_type_ids") && !encoderFeeds.token_type_ids) {
+  if (session2.inputNames.includes("token_type_ids") && !encoderFeeds.token_type_ids) {
     if (!encoderFeeds.input_ids) {
       throw new Error("Both `input_ids` and `token_type_ids` are missing in the model inputs.");
     }
     encoderFeeds.token_type_ids = zeros_like(encoderFeeds.input_ids);
   }
-  if (session.inputNames.includes("pixel_mask") && !encoderFeeds.pixel_mask) {
+  if (session2.inputNames.includes("pixel_mask") && !encoderFeeds.pixel_mask) {
     if (!encoderFeeds.pixel_values) {
       throw new Error("Both `pixel_values` and `pixel_mask` are missing in the model inputs.");
     }
     const dims = encoderFeeds.pixel_values.dims;
     encoderFeeds.pixel_mask = ones([dims[0], dims[2], dims[3]]);
   }
-  return await sessionRun(session, encoderFeeds);
+  return await sessionRun(session2, encoderFeeds);
 }
 async function auto_encoder_forward(self2, model_inputs) {
   const encoded = await self2.encode(model_inputs);
@@ -10215,7 +10215,7 @@ function addPastKeyValues(self2, decoderFeeds, pastKeyValues) {
     Object.assign(decoderFeeds, pastKeyValues);
     return pastKeyValues;
   }
-  const session = self2.sessions["decoder_model_merged"] ?? self2.sessions["model"];
+  const session2 = self2.sessions["decoder_model_merged"] ?? self2.sessions["model"];
   const batch_size = (decoderFeeds[self2.main_input_name] ?? decoderFeeds.attention_mask)?.dims?.[0] ?? 1;
   const names = getCacheNames(self2.config);
   const num_heads = self2.config?.normalized_config?.num_heads;
@@ -10224,7 +10224,7 @@ function addPastKeyValues(self2, decoderFeeds, pastKeyValues) {
     symbols["batch_size x num_heads"] = batch_size * num_heads;
   }
   const entries = /* @__PURE__ */ Object.create(null);
-  for (const meta of session.inputMetadata) {
+  for (const meta of session2.inputMetadata) {
     if (!names.has(meta.name)) continue;
     const shape = resolveCacheShape(meta.shape, symbols);
     const size = shape.reduce((a, b) => a * b, 1);
@@ -10240,23 +10240,23 @@ function addPastKeyValues(self2, decoderFeeds, pastKeyValues) {
   return new DynamicCache(entries);
 }
 async function decoder_forward(self2, model_inputs, is_encoder_decoder = false) {
-  const session = self2.sessions[is_encoder_decoder ? "decoder_model_merged" : "model"];
+  const session2 = self2.sessions[is_encoder_decoder ? "decoder_model_merged" : "model"];
   const { past_key_values, ...new_model_inputs } = model_inputs;
-  if (session.inputNames.includes("use_cache_branch")) {
+  if (session2.inputNames.includes("use_cache_branch")) {
     new_model_inputs.use_cache_branch = boolTensor(
       past_key_values != null && Object.keys(past_key_values).length > 0
     );
   }
-  if (session.inputNames.includes("position_ids") && new_model_inputs.attention_mask && !new_model_inputs.position_ids) {
+  if (session2.inputNames.includes("position_ids") && new_model_inputs.attention_mask && !new_model_inputs.position_ids) {
     const start_index = ["paligemma", "gemma3_text", "gemma3"].includes(self2.config.model_type) ? 1 : 0;
     new_model_inputs.position_ids = create_position_ids(new_model_inputs, past_key_values, start_index);
   }
-  if (session.inputNames.includes("num_logits_to_keep") && !new_model_inputs.num_logits_to_keep) {
+  if (session2.inputNames.includes("num_logits_to_keep") && !new_model_inputs.num_logits_to_keep) {
     new_model_inputs.num_logits_to_keep = new Tensor22("int64", [0n], []);
   }
   addPastKeyValues(self2, new_model_inputs, past_key_values);
-  const fixed = pick(new_model_inputs, session.inputNames);
-  return await sessionRun(session, fixed);
+  const fixed = pick(new_model_inputs, session2.inputNames);
+  return await sessionRun(session2, fixed);
 }
 async function generic_text_to_text_forward(self2, {
   // Generic parameters:
@@ -10394,8 +10394,8 @@ function create_position_ids(model_inputs, past_key_values = null, start_index =
 }
 function decoder_prepare_inputs_for_generation(self2, input_ids, model_inputs, generation_config) {
   const past_length = model_inputs.past_key_values ? model_inputs.past_key_values.get_seq_length() : 0;
-  const session = self2.sessions["decoder_model_merged"] ?? self2.sessions["model"];
-  if (session?.inputNames.includes("num_logits_to_keep") && !model_inputs.num_logits_to_keep) {
+  const session2 = self2.sessions["decoder_model_merged"] ?? self2.sessions["model"];
+  if (session2?.inputNames.includes("num_logits_to_keep") && !model_inputs.num_logits_to_keep) {
     model_inputs.num_logits_to_keep = new Tensor22("int64", [1n], []);
   }
   if (!model_inputs.attention_mask) {
@@ -10653,7 +10653,7 @@ function getTag(entity) {
   const p = entity[0];
   return entity[1] === "-" && (p === "B" || p === "I" || p === "E" || p === "S") ? [p, entity.slice(2)] : ["I", entity];
 }
-function groupEntities(tokens, ids, tokenizer2) {
+function groupEntities(tokens, ids, tokenizer) {
   const groups = [];
   let openTag = null;
   for (let i = 0; i < tokens.length; ++i) {
@@ -10677,7 +10677,7 @@ function groupEntities(tokens, ids, tokenizer2) {
     return {
       entity_group: tag,
       score: scoreSum / (end - start),
-      word: tokenizer2.decode(groupIds, { skip_special_tokens: true })
+      word: tokenizer.decode(groupIds, { skip_special_tokens: true })
     };
   });
 }
@@ -10808,13 +10808,13 @@ async function pipeline2(task, model = null, {
   } else {
     modelPromise = modelClasses.from_pretrained(model, pretrainedOptions);
   }
-  const [tokenizer2, processor, model_loaded] = await Promise.all([
+  const [tokenizer, processor, model_loaded] = await Promise.all([
     hasTokenizer ? AutoTokenizer.from_pretrained(model, pretrainedOptions) : null,
     hasProcessor ? AutoProcessor.from_pretrained(model, pretrainedOptions) : null,
     modelPromise
   ]);
   const results = { task, model: model_loaded };
-  if (tokenizer2) results.tokenizer = tokenizer2;
+  if (tokenizer) results.tokenizer = tokenizer;
   if (processor) results.processor = processor;
   dispatchCallback(progress_callback, {
     status: "ready",
@@ -12021,8 +12021,8 @@ var init_transformers_web = __esm({
        */
       pre_tokenize_text(text, options) {
         return this.tokenizers.reduce(
-          (pre_tokenized_text, tokenizer2) => {
-            return tokenizer2 ? tokenizer2.pre_tokenize(pre_tokenized_text, options) : pre_tokenized_text;
+          (pre_tokenized_text, tokenizer) => {
+            return tokenizer ? tokenizer.pre_tokenize(pre_tokenized_text, options) : pre_tokenized_text;
           },
           [text]
         );
@@ -13334,8 +13334,8 @@ var init_transformers_web = __esm({
     ByteFallback_default = ByteFallback;
     create_decoder_default = create_decoder;
     Tokenizer = class {
-      constructor(tokenizer2, config) {
-        const tokenizer_error = validate_object(tokenizer2, "Tokenizer", [
+      constructor(tokenizer, config) {
+        const tokenizer_error = validate_object(tokenizer, "Tokenizer", [
           "model",
           "decoder",
           "post_processor",
@@ -13349,7 +13349,7 @@ var init_transformers_web = __esm({
         if (config_error) {
           throw new Error(config_error);
         }
-        this.tokenizer = tokenizer2;
+        this.tokenizer = tokenizer;
         this.config = config;
         this.normalizer = create_normalizer_default(this.tokenizer.normalizer);
         this.pre_tokenizer = create_pre_tokenizer_default(this.tokenizer.pre_tokenizer);
@@ -16489,7 +16489,7 @@ var init_transformers_web = __esm({
       };
     }
     wrap = async (session_bytes, session_options, names) => {
-      const session = await createInferenceSession(new Uint8Array(session_bytes), session_options);
+      const session2 = await createInferenceSession(new Uint8Array(session_bytes), session_options);
       return (
         /** @type {any} */
         (async (inputs) => {
@@ -16497,7 +16497,7 @@ var init_transformers_web = __esm({
           const ortFeed = Object.fromEntries(
             Object.entries(inputs).map(([k2, v]) => [k2, (proxied ? v.clone() : v).ort_tensor])
           );
-          const outputs = await runInferenceSession(session, ortFeed);
+          const outputs = await runInferenceSession(session2, ortFeed);
           if (Array.isArray(names)) {
             return names.map((n) => new Tensor22(outputs[n]));
           } else {
@@ -23771,12 +23771,12 @@ ${boi_token}${image_tokens_expanded}${eoi_token}
         this.eoi_token = eoi_token;
       }
       static async from_pretrained(pretrained_model_name_or_path, options = {}) {
-        const [config, tokenizer2, chat_template] = await Promise.all([
+        const [config, tokenizer, chat_template] = await Promise.all([
           getModelJSON(pretrained_model_name_or_path, PROCESSOR_NAME, true, options),
           AutoTokenizer.from_pretrained(pretrained_model_name_or_path, options),
           getModelText(pretrained_model_name_or_path, CHAT_TEMPLATE_NAME, false, options)
         ]);
-        const components = { tokenizer: tokenizer2 };
+        const components = { tokenizer };
         if (config.image_processor) {
           components.image_processor = new Gemma4ImageProcessor(config.image_processor);
         }
@@ -24095,13 +24095,13 @@ ${this.boa_token}${this.audio_token.repeat(this._compute_audio_num_tokens(audio_
         } else if (!Array.isArray(images)) {
           images = [images];
         }
-        const tokenizer2 = this.tokenizer;
-        const result = tokenizer2.apply_chat_template(conversation, {
+        const tokenizer = this.tokenizer;
+        const result = tokenizer.apply_chat_template(conversation, {
           tokenize: false,
           add_generation_prompt: true,
           chat_template
         });
-        const encode = (text) => tokenizer2.encode(text, { add_special_tokens: false });
+        const encode = (text) => tokenizer.encode(text, { add_special_tokens: false });
         const parts = (
           /** @type {string} */
           result.split(this.image_tag)
@@ -24112,7 +24112,7 @@ ${this.boa_token}${this.audio_token.repeat(this._compute_audio_num_tokens(audio_
             `Number of images provided (${images.length}) does not match number of "${this.image_tag}" image tags (${num_images})`
           );
         }
-        const [image_placeholder_tag_id, image_start_tag_id, image_end_tag_id] = tokenizer2.convert_tokens_to_ids([
+        const [image_placeholder_tag_id, image_start_tag_id, image_end_tag_id] = tokenizer.convert_tokens_to_ids([
           this.image_tag,
           this.image_start_tag,
           this.image_end_tag
@@ -26441,8 +26441,8 @@ ${this.boa_token}${this.audio_token.repeat(this._compute_audio_num_tokens(audio_
        */
       async dispose() {
         const promises = [];
-        for (const session of Object.values(this.sessions)) {
-          promises.push(session.release?.());
+        for (const session2 of Object.values(this.sessions)) {
+          promises.push(session2.release?.());
         }
         return await Promise.all(promises);
       }
@@ -26997,8 +26997,8 @@ ${this.boa_token}${this.audio_token.repeat(this._compute_audio_num_tokens(audio_
         if (!Object.hasOwn(this.sessions, sessionName)) {
           throw new Error(`Model does not have a ${sessionName} session.`);
         }
-        const session = this.sessions[sessionName];
-        const output = await sessionRun(session, pick(inputs, session.inputNames));
+        const session2 = this.sessions[sessionName];
+        const output = await sessionRun(session2, pick(inputs, session2.inputNames));
         return output[outputName];
       }
       async encode_image(inputs) {
@@ -29255,8 +29255,8 @@ ${this.boa_token}${this.audio_token.repeat(this._compute_audio_num_tokens(audio_
         if (!model_inputs.attention_mask || model_inputs.position_ids) {
           return model_inputs;
         }
-        const session = this.sessions["decoder_model_merged"] ?? this.sessions["model"];
-        if (!session.inputNames.includes("position_ids")) {
+        const session2 = this.sessions["decoder_model_merged"] ?? this.sessions["model"];
+        if (!session2.inputNames.includes("position_ids")) {
           return model_inputs;
         }
         if (!model_inputs.past_key_values) {
@@ -30051,18 +30051,18 @@ ${this.boa_token}${this.audio_token.repeat(this._compute_audio_num_tokens(audio_
         const mode = this._generation_mode ?? "text";
         let output_1;
         if (mode === "text" || !model_inputs.past_key_values) {
-          const session = this.sessions["prepare_inputs_embeds"];
-          const prep_inputs = pick(model_inputs, session.inputNames);
-          output_1 = await sessionRun(session, prep_inputs);
+          const session2 = this.sessions["prepare_inputs_embeds"];
+          const prep_inputs = pick(model_inputs, session2.inputNames);
+          output_1 = await sessionRun(session2, prep_inputs);
         } else {
-          const session = this.sessions["gen_img_embeds"];
+          const session2 = this.sessions["gen_img_embeds"];
           const prep_inputs = pick(
             {
               image_ids: model_inputs.input_ids
             },
-            session.inputNames
+            session2.inputNames
           );
-          output_1 = await sessionRun(session, prep_inputs);
+          output_1 = await sessionRun(session2, prep_inputs);
         }
         const input_2 = { ...model_inputs, ...output_1 };
         const output_2 = await decoder_forward(this, input_2);
@@ -31338,9 +31338,9 @@ ${this.boa_token}${this.audio_token.repeat(this._compute_audio_num_tokens(audio_
         }
         const decoder_feeds = { inputs_embeds, ...kwargs };
         addPastKeyValues(this, decoder_feeds, past_key_values);
-        const session = this.sessions["decoder_model_merged"];
-        const fixed = pick(decoder_feeds, session.inputNames);
-        return await sessionRun(session, fixed);
+        const session2 = this.sessions["decoder_model_merged"];
+        const fixed = pick(decoder_feeds, session2.inputNames);
+        return await sessionRun(session2, fixed);
       }
       async generate({ input_features, stopping_criteria: userStoppingCriteria, ...kwargs }) {
         if (!input_features) {
@@ -32797,11 +32797,11 @@ ${this.boa_token}${this.audio_token.repeat(this._compute_audio_num_tokens(audio_
        * @param {PreTrainedTokenizer} [options.tokenizer=null] The tokenizer used by the pipeline (if any).
        * @param {Processor} [options.processor=null] The processor used by the pipeline (if any).
        */
-      constructor({ task, model, tokenizer: tokenizer2 = null, processor = null }) {
+      constructor({ task, model, tokenizer = null, processor = null }) {
         super();
         this.task = task;
         this.model = model;
-        this.tokenizer = tokenizer2;
+        this.tokenizer = tokenizer;
         this.processor = processor;
       }
       /** @type {DisposeType} */
@@ -33007,23 +33007,23 @@ ${this.boa_token}${this.audio_token.repeat(this._compute_audio_num_tokens(audio_
             texts = texts.map((x) => task_specific_params[this.task].prefix + x);
           }
         }
-        const tokenizer2 = this.tokenizer;
+        const tokenizer = this.tokenizer;
         const tokenizer_options = {
           padding: true,
           truncation: true
         };
         let inputs;
-        if (this.task === "translation" && "_build_translation_inputs" in tokenizer2) {
-          inputs = tokenizer2._build_translation_inputs(texts, tokenizer_options, generate_kwargs);
+        if (this.task === "translation" && "_build_translation_inputs" in tokenizer) {
+          inputs = tokenizer._build_translation_inputs(texts, tokenizer_options, generate_kwargs);
         } else {
-          inputs = tokenizer2(texts, tokenizer_options);
+          inputs = tokenizer(texts, tokenizer_options);
         }
         const outputTokenIds = await this.model.generate({
           ...inputs,
           ...this._default_generation_config,
           ...generate_kwargs
         });
-        return tokenizer2.batch_decode(
+        return tokenizer.batch_decode(
           /** @type {Tensor} */
           outputTokenIds,
           {
@@ -34259,7 +34259,7 @@ ${this.boa_token}${this.audio_token.repeat(this._compute_audio_num_tokens(audio_
        * @param {function(bigint[]): void} [options.token_callback_function=null] Function to call when a new token is generated
        * @param {Object} [options.decode_kwargs={}] Additional keyword arguments to pass to the tokenizer's decode method
        */
-      constructor(tokenizer2, {
+      constructor(tokenizer, {
         skip_prompt = false,
         callback_function = null,
         token_callback_function = null,
@@ -34268,7 +34268,7 @@ ${this.boa_token}${this.audio_token.repeat(this._compute_audio_num_tokens(audio_
         ...kwargs
       } = {}) {
         super();
-        this.tokenizer = tokenizer2;
+        this.tokenizer = tokenizer;
         this.skip_prompt = skip_prompt;
         this.callback_function = callback_function ?? stdout_write;
         this.token_callback_function = token_callback_function;
@@ -34366,7 +34366,7 @@ ${this.boa_token}${this.audio_token.repeat(this._compute_audio_num_tokens(audio_
        * @param {boolean} [options.skip_special_tokens=true] Whether to skip special tokens when decoding
        * @param {Object} [options.decode_kwargs={}] Additional keyword arguments to pass to the tokenizer's decode method
        */
-      constructor(tokenizer2, {
+      constructor(tokenizer, {
         skip_prompt = false,
         callback_function = null,
         token_callback_function = null,
@@ -34377,14 +34377,14 @@ ${this.boa_token}${this.audio_token.repeat(this._compute_audio_num_tokens(audio_
         skip_special_tokens = true,
         decode_kwargs = {}
       } = {}) {
-        super(tokenizer2, {
+        super(tokenizer, {
           skip_prompt,
           skip_special_tokens,
           callback_function,
           token_callback_function,
           decode_kwargs
         });
-        this.timestamp_begin = tokenizer2.timestamp_begin;
+        this.timestamp_begin = tokenizer.timestamp_begin;
         this.on_chunk_start = on_chunk_start;
         this.on_chunk_end = on_chunk_end;
         this.on_finalize = on_finalize;
@@ -34709,6 +34709,274 @@ ${this.boa_token}${this.audio_token.repeat(this._compute_audio_num_tokens(audio_
     };
   }
 });
+
+// src/config.js
+var QWEN25_3B = {
+  hiddenSize: 2048,
+  numLayers: 36,
+  numHeads: 16,
+  numKVHeads: 2,
+  headDim: 128,
+  intermediateSize: 11008,
+  vocabSize: 151936,
+  rmsNormEps: 1e-6,
+  ropeTheta: 1e6,
+  tieWordEmbeddings: true,
+  // qkv projections have a bias in Qwen2.5; o_proj and mlp do not.
+  attentionBias: true
+};
+
+// src/qwgpu/model_schema.js
+var arrEq = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+function projDesc(layer, subpath, outDim, inDim, { bias = false } = {}) {
+  const name = `model.layers.${layer}.${subpath}.weight`;
+  const m = subpath.match(/^(self_attn|mlp)\.(.+)$/);
+  const loraKey = `layers.${layer}.${m[1]}.${m[2]}`;
+  return {
+    name,
+    role: "projection",
+    quant: "int4",
+    shape: [outDim, inDim],
+    loraKey,
+    biasName: bias ? name.replace(/\.weight$/, ".bias") : null
+  };
+}
+function f32Desc(name, shape, role = "f32") {
+  return { name, role, quant: "f32", shape };
+}
+function createQwenSchema(cfg) {
+  if (!cfg.tieWordEmbeddings && cfg.tieWordEmbeddings !== void 0) {
+    throw new Error("QwenWGPU currently requires tied input/output embeddings");
+  }
+  const H = cfg.hiddenSize;
+  const QD = cfg.numHeads * cfg.headDim;
+  const KVD = cfg.numKVHeads * cfg.headDim;
+  const I = cfg.intermediateSize;
+  const tensors = [];
+  const layers = [];
+  const add = (d) => {
+    tensors.push(d);
+    return d;
+  };
+  const embed = add({ name: "model.embed_tokens.weight", role: "embedding", quant: "int8", shape: [cfg.vocabSize, H] });
+  const finalNorm = add(f32Desc("model.norm.weight", [H], "final_norm"));
+  for (let i = 0; i < cfg.numLayers; i++) {
+    const p = `model.layers.${i}`;
+    const layer = {
+      index: i,
+      inputNorm: add(f32Desc(`${p}.input_layernorm.weight`, [H], "input_norm")),
+      postAttentionNorm: add(f32Desc(`${p}.post_attention_layernorm.weight`, [H], "post_attention_norm")),
+      projections: {},
+      biases: {}
+    };
+    layer.projections.q = add(projDesc(i, "self_attn.q_proj", QD, H, { bias: !!cfg.attentionBias }));
+    layer.projections.k = add(projDesc(i, "self_attn.k_proj", KVD, H, { bias: !!cfg.attentionBias }));
+    layer.projections.v = add(projDesc(i, "self_attn.v_proj", KVD, H, { bias: !!cfg.attentionBias }));
+    layer.projections.o = add(projDesc(i, "self_attn.o_proj", H, QD));
+    layer.projections.gate = add(projDesc(i, "mlp.gate_proj", I, H));
+    layer.projections.up = add(projDesc(i, "mlp.up_proj", I, H));
+    layer.projections.down = add(projDesc(i, "mlp.down_proj", H, I));
+    for (const key of ["q", "k", "v"]) {
+      const proj = layer.projections[key];
+      if (proj.biasName) {
+        const bias = add(f32Desc(proj.biasName, [proj.shape[0]], `${key}_bias`));
+        layer.biases[key] = bias;
+      }
+    }
+    layers.push(layer);
+  }
+  const byName = new Map(tensors.map((t) => [t.name, t]));
+  const expectedNames = new Set(byName.keys());
+  return {
+    cfg,
+    tensors,
+    byName,
+    expectedNames,
+    layers,
+    embed,
+    finalNorm,
+    projectionDescs: tensors.filter((t) => t.role === "projection"),
+    validateTensor(name, shape) {
+      const desc = byName.get(name);
+      if (!desc) return null;
+      if (!arrEq(shape, desc.shape)) {
+        throw new Error(`shape mismatch for ${name}: got [${shape.join(",")}], expected [${desc.shape.join(",")}]`);
+      }
+      return desc;
+    },
+    assertComplete(seen) {
+      const missing = [];
+      for (const name of expectedNames) if (!seen.has(name)) missing.push(name);
+      if (missing.length) {
+        const sample2 = missing.slice(0, 12).join(", ");
+        throw new Error(`missing ${missing.length} required tensor(s): ${sample2}${missing.length > 12 ? ", \u2026" : ""}`);
+      }
+    }
+  };
+}
+function moduleKeyFromTensorName(name) {
+  const m = name.match(/layers\.(\d+)\.(self_attn|mlp)\.([a-z_]+?)(_proj)?\.(lora_[ABab])/i);
+  if (!m) return null;
+  return `layers.${m[1]}.${m[2]}.${m[3].replace(/_proj$/, "")}_proj`;
+}
+
+// src/lora_gpu.js
+function parseSt(buf) {
+  const dv = new DataView(buf);
+  const hl = Number(dv.getBigUint64(0, true));
+  const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 8, hl)));
+  return { header, dataStart: 8 + hl, u8: new Uint8Array(buf) };
+}
+function bf16f32(u8, off, n) {
+  const u16 = new Uint16Array(u8.buffer, u8.byteOffset + off, n);
+  const o = new Float32Array(n);
+  const o32 = new Uint32Array(o.buffer);
+  for (let i = 0; i < n; i++) o32[i] = u16[i] << 16;
+  return o;
+}
+function f32(u8, off, n) {
+  return new Float32Array(u8.buffer.slice(u8.byteOffset + off, u8.byteOffset + off + n * 4));
+}
+function readTensor(st2, name) {
+  const t = st2.header[name];
+  const n = t.shape.reduce((a, b) => a * b, 1);
+  const dt = t.dtype.toUpperCase();
+  const arr = dt === "BF16" ? bf16f32(st2.u8, st2.dataStart + t.data_offsets[0], n) : f32(st2.u8, st2.dataStart + t.data_offsets[0], n);
+  return { arr, shape: t.shape };
+}
+var isA = (name) => /lora_a/i.test(name);
+function transpose2d(arr, rows, cols) {
+  const o = new Float32Array(arr.length);
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) o[c * rows + r] = arr[r * cols + c];
+  return o;
+}
+async function loadLoraAdapterGPU(dev, files, cfg) {
+  const stFile = files.find((f) => f.name.endsWith(".safetensors"));
+  if (!stFile) throw new Error("no .safetensors in adapter files");
+  const cfgFile = files.find((f) => /adapter_config\.json|config\.json/.test(f.name));
+  let rankCfg = 16, scaleCfg = null;
+  if (cfgFile) {
+    const c = JSON.parse(await cfgFile.text());
+    const lp = c.lora_parameters || {};
+    rankCfg = c.r ?? c.rank ?? c.lora_rank ?? lp.rank ?? rankCfg;
+    if (lp.scale != null) scaleCfg = lp.scale;
+    else if (c.lora_alpha != null) scaleCfg = c.lora_alpha / rankCfg;
+    else if (c.alpha != null) scaleCfg = c.alpha / rankCfg;
+  }
+  const st2 = parseSt(await stFile.arrayBuffer());
+  const names = Object.keys(st2.header).filter((k2) => k2 !== "__metadata__" && /lora_[abAB]/.test(k2));
+  const groups = {};
+  for (const nm of names) {
+    const key = moduleKeyFromTensorName(nm);
+    if (!key) continue;
+    (groups[key] ||= {})[isA(nm) ? "A" : "B"] = readTensor(st2, nm);
+  }
+  const S = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
+  const mk = (arr) => {
+    const b = dev.createBuffer({ size: arr.byteLength, usage: S });
+    dev.queue.writeBuffer(b, 0, arr);
+    return b;
+  };
+  const modules = {};
+  for (const key of Object.keys(groups)) {
+    const g = groups[key];
+    if (!g.A || !g.B) continue;
+    const r = Math.min(...g.A.shape, ...g.B.shape);
+    let Aarr = g.A.arr;
+    if (g.A.shape[0] !== r) Aarr = transpose2d(g.A.arr, g.A.shape[0], g.A.shape[1]);
+    let Barr = g.B.arr;
+    if (g.B.shape[0] !== r) Barr = transpose2d(g.B.arr, g.B.shape[0], g.B.shape[1]);
+    const scale = scaleCfg != null ? scaleCfg : 2;
+    modules[key] = { A: mk(Aarr), B: mk(Barr), rank: r, scale };
+  }
+  if (!Object.keys(modules).length) throw new Error("no LoRA modules matched layers.*.{self_attn,mlp}.*_proj");
+  const name = stFile.name.replace(/\.safetensors$/, "");
+  return { name, modules };
+}
+
+// src/readers.js
+function urlReader(baseUrl, headers = {}) {
+  const base = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
+  return {
+    async range(path, start, end) {
+      const r = await fetch(base + path, { headers: { ...headers, Range: `bytes=${start}-${end - 1}` } });
+      if (!r.ok && r.status !== 206) throw new Error(`range ${path} ${start}-${end}: ${r.status}`);
+      return await r.arrayBuffer();
+    },
+    async text(path) {
+      const r = await fetch(base + path, { headers });
+      if (!r.ok) throw new Error(`fetch ${path}: ${r.status}`);
+      return await r.text();
+    }
+  };
+}
+function hfReader(repo, token = "", rev = "main") {
+  return urlReader(`https://huggingface.co/${repo}/resolve/${rev}`, token ? { Authorization: `Bearer ${token}` } : {});
+}
+function fileReader(fileMap) {
+  const pick2 = (path) => fileMap[path] || fileMap[path.split("/").pop()];
+  return {
+    async range(path, start, end) {
+      const f = pick2(path);
+      if (!f) throw new Error(`file not provided: ${path}`);
+      return await f.slice(start, end).arrayBuffer();
+    },
+    async text(path) {
+      const f = pick2(path);
+      if (!f) throw new Error(`file not provided: ${path}`);
+      return await f.text();
+    }
+  };
+}
+
+// src/services/adapter_registry.js
+var AdapterRegistry = class {
+  constructor() {
+    this.adapters = { none: null };
+  }
+  add(name, modules) {
+    this.adapters[name] = { modules };
+    return this.adapters[name];
+  }
+  get(name) {
+    return this.adapters[name] || null;
+  }
+  applyToRuntime(name, rt2) {
+    const adapter = this.get(name);
+    if (adapter) rt2.setLora(adapter);
+    else rt2.clearLora();
+    return adapter;
+  }
+};
+
+// src/services/generation_controller.js
+var GenerationController = class {
+  constructor({ session: session2, adapters: adapters2, systemPrompt, log: log2 = () => {
+  } }) {
+    this.session = session2;
+    this.adapters = adapters2;
+    this.systemPrompt = systemPrompt;
+    this.log = log2;
+  }
+  async runTriage({ adapterName, report, outputNode, maxTemperature = 0 }) {
+    const rt2 = this.session.rt;
+    if (!rt2) return;
+    outputNode.textContent = "";
+    const node = document.createTextNode("");
+    outputNode.appendChild(node);
+    this.adapters.applyToRuntime(adapterName, rt2);
+    this.log(`generating (adapter=${adapterName})\u2026`);
+    const messages = [{ role: "system", content: this.systemPrompt }, { role: "user", content: report }];
+    const t0 = performance.now();
+    let n = 0;
+    for await (const delta of this.session.generate(messages, { maxTokens: rt2.maxCtx, temperature: maxTemperature })) {
+      node.appendData(delta);
+      n++;
+    }
+    const dt = (performance.now() - t0) / 1e3;
+    this.log(`done: ${n} tokens in ${dt.toFixed(1)}s (${(n / dt).toFixed(1)} tok/s) adapter=${adapterName}`);
+  }
+};
 
 // src/qwgpu/kernels.js
 var GEMV = `
@@ -35119,100 +35387,6 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
   }
 }`;
 
-// src/qwgpu/model_schema.js
-var arrEq = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
-function projDesc(layer, subpath, outDim, inDim, { bias = false } = {}) {
-  const name = `model.layers.${layer}.${subpath}.weight`;
-  const m = subpath.match(/^(self_attn|mlp)\.(.+)$/);
-  const loraKey = `layers.${layer}.${m[1]}.${m[2]}`;
-  return {
-    name,
-    role: "projection",
-    quant: "int4",
-    shape: [outDim, inDim],
-    loraKey,
-    biasName: bias ? name.replace(/\.weight$/, ".bias") : null
-  };
-}
-function f32Desc(name, shape, role = "f32") {
-  return { name, role, quant: "f32", shape };
-}
-function createQwenSchema(cfg) {
-  if (!cfg.tieWordEmbeddings && cfg.tieWordEmbeddings !== void 0) {
-    throw new Error("QwenWGPU currently requires tied input/output embeddings");
-  }
-  const H = cfg.hiddenSize;
-  const QD = cfg.numHeads * cfg.headDim;
-  const KVD = cfg.numKVHeads * cfg.headDim;
-  const I = cfg.intermediateSize;
-  const tensors = [];
-  const layers = [];
-  const add = (d) => {
-    tensors.push(d);
-    return d;
-  };
-  const embed = add({ name: "model.embed_tokens.weight", role: "embedding", quant: "int8", shape: [cfg.vocabSize, H] });
-  const finalNorm = add(f32Desc("model.norm.weight", [H], "final_norm"));
-  for (let i = 0; i < cfg.numLayers; i++) {
-    const p = `model.layers.${i}`;
-    const layer = {
-      index: i,
-      inputNorm: add(f32Desc(`${p}.input_layernorm.weight`, [H], "input_norm")),
-      postAttentionNorm: add(f32Desc(`${p}.post_attention_layernorm.weight`, [H], "post_attention_norm")),
-      projections: {},
-      biases: {}
-    };
-    layer.projections.q = add(projDesc(i, "self_attn.q_proj", QD, H, { bias: !!cfg.attentionBias }));
-    layer.projections.k = add(projDesc(i, "self_attn.k_proj", KVD, H, { bias: !!cfg.attentionBias }));
-    layer.projections.v = add(projDesc(i, "self_attn.v_proj", KVD, H, { bias: !!cfg.attentionBias }));
-    layer.projections.o = add(projDesc(i, "self_attn.o_proj", H, QD));
-    layer.projections.gate = add(projDesc(i, "mlp.gate_proj", I, H));
-    layer.projections.up = add(projDesc(i, "mlp.up_proj", I, H));
-    layer.projections.down = add(projDesc(i, "mlp.down_proj", H, I));
-    for (const key of ["q", "k", "v"]) {
-      const proj = layer.projections[key];
-      if (proj.biasName) {
-        const bias = add(f32Desc(proj.biasName, [proj.shape[0]], `${key}_bias`));
-        layer.biases[key] = bias;
-      }
-    }
-    layers.push(layer);
-  }
-  const byName = new Map(tensors.map((t) => [t.name, t]));
-  const expectedNames = new Set(byName.keys());
-  return {
-    cfg,
-    tensors,
-    byName,
-    expectedNames,
-    layers,
-    embed,
-    finalNorm,
-    projectionDescs: tensors.filter((t) => t.role === "projection"),
-    validateTensor(name, shape) {
-      const desc = byName.get(name);
-      if (!desc) return null;
-      if (!arrEq(shape, desc.shape)) {
-        throw new Error(`shape mismatch for ${name}: got [${shape.join(",")}], expected [${desc.shape.join(",")}]`);
-      }
-      return desc;
-    },
-    assertComplete(seen) {
-      const missing = [];
-      for (const name of expectedNames) if (!seen.has(name)) missing.push(name);
-      if (missing.length) {
-        const sample2 = missing.slice(0, 12).join(", ");
-        throw new Error(`missing ${missing.length} required tensor(s): ${sample2}${missing.length > 12 ? ", \u2026" : ""}`);
-      }
-    }
-  };
-}
-function moduleKeyFromTensorName(name) {
-  const m = name.match(/layers\.(\d+)\.(self_attn|mlp)\.([a-z_]+?)(_proj)?\.(lora_[ABab])/i);
-  if (!m) return null;
-  return `layers.${m[1]}.${m[2]}.${m[3].replace(/_proj$/, "")}_proj`;
-}
-
 // src/qwgpu/dispatch_plan.js
 function createDispatchPlan(schema) {
   return {
@@ -35258,41 +35432,6 @@ function createDispatchPlan(schema) {
         loraKey: layer.projections.down.loraKey
       }
     }))
-  };
-}
-
-// src/readers.js
-function urlReader(baseUrl, headers = {}) {
-  const base = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
-  return {
-    async range(path, start, end) {
-      const r = await fetch(base + path, { headers: { ...headers, Range: `bytes=${start}-${end - 1}` } });
-      if (!r.ok && r.status !== 206) throw new Error(`range ${path} ${start}-${end}: ${r.status}`);
-      return await r.arrayBuffer();
-    },
-    async text(path) {
-      const r = await fetch(base + path, { headers });
-      if (!r.ok) throw new Error(`fetch ${path}: ${r.status}`);
-      return await r.text();
-    }
-  };
-}
-function hfReader(repo, token = "", rev = "main") {
-  return urlReader(`https://huggingface.co/${repo}/resolve/${rev}`, token ? { Authorization: `Bearer ${token}` } : {});
-}
-function fileReader(fileMap) {
-  const pick2 = (path) => fileMap[path] || fileMap[path.split("/").pop()];
-  return {
-    async range(path, start, end) {
-      const f = pick2(path);
-      if (!f) throw new Error(`file not provided: ${path}`);
-      return await f.slice(start, end).arrayBuffer();
-    },
-    async text(path) {
-      const f = pick2(path);
-      if (!f) throw new Error(`file not provided: ${path}`);
-      return await f.text();
-    }
   };
 }
 
@@ -35600,7 +35739,7 @@ var QwenWGPU = class {
   // `source` is a base URL string OR a reader { range, text } (e.g. hfReader/fileReader).
   async build(source, onProgress = () => {
   }) {
-    const dev2 = this.dev, c = this.cfg;
+    const dev = this.dev, c = this.cfg;
     this.CHUNK = 128;
     this.MAXBATCH = 16;
     this.maxCtx = this.opts.maxCtx || 8192;
@@ -36044,148 +36183,47 @@ var QwenWGPU = class {
   }
 };
 
-// src/config.js
-var QWEN25_3B = {
-  hiddenSize: 2048,
-  numLayers: 36,
-  numHeads: 16,
-  numKVHeads: 2,
-  headDim: 128,
-  intermediateSize: 11008,
-  vocabSize: 151936,
-  rmsNormEps: 1e-6,
-  ropeTheta: 1e6,
-  tieWordEmbeddings: true,
-  // qkv projections have a bias in Qwen2.5; o_proj and mlp do not.
-  attentionBias: true
-};
-
-// src/lora_gpu.js
-function parseSt(buf) {
-  const dv = new DataView(buf);
-  const hl = Number(dv.getBigUint64(0, true));
-  const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 8, hl)));
-  return { header, dataStart: 8 + hl, u8: new Uint8Array(buf) };
-}
-function bf16f32(u8, off, n) {
-  const u16 = new Uint16Array(u8.buffer, u8.byteOffset + off, n);
-  const o = new Float32Array(n);
-  const o32 = new Uint32Array(o.buffer);
-  for (let i = 0; i < n; i++) o32[i] = u16[i] << 16;
-  return o;
-}
-function f32(u8, off, n) {
-  return new Float32Array(u8.buffer.slice(u8.byteOffset + off, u8.byteOffset + off + n * 4));
-}
-function readTensor(st2, name) {
-  const t = st2.header[name];
-  const n = t.shape.reduce((a, b) => a * b, 1);
-  const dt = t.dtype.toUpperCase();
-  const arr = dt === "BF16" ? bf16f32(st2.u8, st2.dataStart + t.data_offsets[0], n) : f32(st2.u8, st2.dataStart + t.data_offsets[0], n);
-  return { arr, shape: t.shape };
-}
-var isA = (name) => /lora_a/i.test(name);
-function transpose2d(arr, rows, cols) {
-  const o = new Float32Array(arr.length);
-  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) o[c * rows + r] = arr[r * cols + c];
-  return o;
-}
-async function loadLoraAdapterGPU(dev2, files, cfg) {
-  const stFile = files.find((f) => f.name.endsWith(".safetensors"));
-  if (!stFile) throw new Error("no .safetensors in adapter files");
-  const cfgFile = files.find((f) => /adapter_config\.json|config\.json/.test(f.name));
-  let rankCfg = 16, scaleCfg = null;
-  if (cfgFile) {
-    const c = JSON.parse(await cfgFile.text());
-    const lp = c.lora_parameters || {};
-    rankCfg = c.r ?? c.rank ?? c.lora_rank ?? lp.rank ?? rankCfg;
-    if (lp.scale != null) scaleCfg = lp.scale;
-    else if (c.lora_alpha != null) scaleCfg = c.lora_alpha / rankCfg;
-    else if (c.alpha != null) scaleCfg = c.alpha / rankCfg;
-  }
-  const st2 = parseSt(await stFile.arrayBuffer());
-  const names = Object.keys(st2.header).filter((k2) => k2 !== "__metadata__" && /lora_[abAB]/.test(k2));
-  const groups = {};
-  for (const nm of names) {
-    const key = moduleKeyFromTensorName(nm);
-    if (!key) continue;
-    (groups[key] ||= {})[isA(nm) ? "A" : "B"] = readTensor(st2, nm);
-  }
-  const S = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
-  const mk = (arr) => {
-    const b = dev2.createBuffer({ size: arr.byteLength, usage: S });
-    dev2.queue.writeBuffer(b, 0, arr);
-    return b;
-  };
-  const modules = {};
-  for (const key of Object.keys(groups)) {
-    const g = groups[key];
-    if (!g.A || !g.B) continue;
-    const r = Math.min(...g.A.shape, ...g.B.shape);
-    let Aarr = g.A.arr;
-    if (g.A.shape[0] !== r) Aarr = transpose2d(g.A.arr, g.A.shape[0], g.A.shape[1]);
-    let Barr = g.B.arr;
-    if (g.B.shape[0] !== r) Barr = transpose2d(g.B.arr, g.B.shape[0], g.B.shape[1]);
-    const scale = scaleCfg != null ? scaleCfg : 2;
-    modules[key] = { A: mk(Aarr), B: mk(Barr), rank: r, scale };
-  }
-  if (!Object.keys(modules).length) throw new Error("no LoRA modules matched layers.*.{self_attn,mlp}.*_proj");
-  const name = stFile.name.replace(/\.safetensors$/, "");
-  return { name, modules };
-}
-
-// src/main.js
-var $2 = (id) => document.getElementById(id);
-var log = (m) => {
-  const s = $2("status");
-  if (s) s.textContent = m;
-  console.log("[harness]", m);
-};
-var SYS = `You are a senior bug bounty triage analyst. Read the submission and assign exactly ONE disposition from: valid_impactful, valid_low, corroborated_surge, likely_duplicate, out_of_scope, theoretical_no_poc, self_inflicted, accepted_risk, slop. Estimate severity_estimate (critical/high/medium/low/none). Think step by step, then output a SINGLE JSON object on the last line with keys: disposition, severity_estimate, is_duplicate_risk, reasoning, questions_for_researcher, confidence. Output only valid JSON for that object.`;
-var rt2 = null;
-var dev = null;
-var tokenizer = null;
-var adapters = { none: null };
-async function initDevice() {
-  log("requesting WebGPU device\u2026");
+// src/services/device_service.js
+async function initWebGPUDevice({ log: log2 = () => {
+} } = {}) {
+  log2("requesting WebGPU device\u2026");
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
   if (!adapter) throw new Error("no WebGPU adapter (use a WebGPU-capable browser)");
   if (!adapter.features.has("subgroups")) throw new Error('GPU lacks the "subgroups" feature (needed by the fast GEMV kernels)');
-  dev = await adapter.requestDevice({ requiredFeatures: ["subgroups"], requiredLimits: { maxBufferSize: adapter.limits.maxBufferSize, maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize } });
+  const dev = await adapter.requestDevice({
+    requiredFeatures: ["subgroups"],
+    requiredLimits: {
+      maxBufferSize: adapter.limits.maxBufferSize,
+      maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize
+    }
+  });
   dev.addEventListener?.("uncapturederror", (e) => console.error("GPUERR", e.error.message));
-  log(`WebGPU ready. maxBuffer=${(Number(adapter.limits.maxBufferSize) / 1e9).toFixed(2)}GB`);
+  log2(`WebGPU ready. maxBuffer=${(Number(adapter.limits.maxBufferSize) / 1e9).toFixed(2)}GB`);
+  return dev;
 }
+
+// src/services/prompt_formatter.js
+function chatML(messages) {
+  let s = messages[0]?.role === "system" ? "" : "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n";
+  for (const m of messages) s += `<|im_start|>${m.role}
+${m.content}<|im_end|>
+`;
+  return s + "<|im_start|>assistant\n";
+}
+function formatMessages(tokenizer, messages) {
+  try {
+    return tokenizer.apply_chat_template(messages, { tokenize: false, add_generation_prompt: true });
+  } catch {
+    return chatML(messages);
+  }
+}
+
+// src/services/model_session.js
 async function buildTokenizer(reader) {
   const tj = JSON.parse(await reader.text("tokenizer.json"));
   const tc2 = JSON.parse(await reader.text("tokenizer_config.json"));
   const { PreTrainedTokenizer: PreTrainedTokenizer2 } = await Promise.resolve().then(() => (init_transformers_web(), transformers_web_exports));
   return new PreTrainedTokenizer2(tj, tc2);
-}
-async function loadWith(reader, label) {
-  await initDevice();
-  log(`loading tokenizer from ${label}\u2026`);
-  tokenizer = await buildTokenizer(reader);
-  log(`tokenizer loaded. streaming + quantizing weights (int4) from ${label}\u2026`);
-  const t0 = performance.now();
-  rt2 = new QwenWGPU(dev, QWEN25_3B);
-  await rt2.build(reader, (msg, frac) => log(`weights: ${msg} ${(frac * 100).toFixed(0)}%`));
-  window.__rt = rt2;
-  window.__tokenizer = tokenizer;
-  log(`READY in ${((performance.now() - t0) / 1e3).toFixed(1)}s \u2014 base loaded once; adapters hot-swap live.`);
-  $2("go").disabled = false;
-  $2("loraFile").disabled = false;
-}
-async function readLogits() {
-  const n = QWEN25_3B.vocabSize;
-  const rb = dev.createBuffer({ size: n * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
-  const enc = dev.createCommandEncoder();
-  enc.copyBufferToBuffer(rt2.s.logits, 0, rb, 0, n * 4);
-  dev.queue.submit([enc.finish()]);
-  await rb.mapAsync(GPUMapMode.READ);
-  const a = new Float32Array(rb.getMappedRange()).slice();
-  rb.unmap();
-  rb.destroy();
-  return a;
 }
 function sample(logits, temperature) {
   let best = 0, bv = -Infinity;
@@ -36208,85 +36246,142 @@ function sample(logits, temperature) {
   }
   return p.length - 1;
 }
-function chatML(messages) {
-  let s = messages[0]?.role === "system" ? "" : "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n";
-  for (const m of messages) s += `<|im_start|>${m.role}
-${m.content}<|im_end|>
-`;
-  return s + "<|im_start|>assistant\n";
+var ModelSession = class {
+  constructor({ cfg = QWEN25_3B, log: log2 = () => {
+  } } = {}) {
+    this.cfg = cfg;
+    this.log = log2;
+    this.dev = null;
+    this.rt = null;
+    this.tokenizer = null;
+  }
+  async loadWith(reader, label) {
+    this.dev = await initWebGPUDevice({ log: this.log });
+    this.log(`loading tokenizer from ${label}\u2026`);
+    this.tokenizer = await buildTokenizer(reader);
+    this.log(`tokenizer loaded. streaming + quantizing weights (int4) from ${label}\u2026`);
+    const t0 = performance.now();
+    this.rt = new QwenWGPU(this.dev, this.cfg);
+    await this.rt.build(reader, (msg, frac) => this.log(`weights: ${msg} ${(frac * 100).toFixed(0)}%`));
+    window.__rt = this.rt;
+    window.__tokenizer = this.tokenizer;
+    this.log(`READY in ${((performance.now() - t0) / 1e3).toFixed(1)}s \u2014 base loaded once; adapters hot-swap live.`);
+    return this;
+  }
+  async readLogits() {
+    const n = this.cfg.vocabSize;
+    const rb = this.dev.createBuffer({ size: n * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const enc = this.dev.createCommandEncoder();
+    enc.copyBufferToBuffer(this.rt.s.logits, 0, rb, 0, n * 4);
+    this.dev.queue.submit([enc.finish()]);
+    await rb.mapAsync(GPUMapMode.READ);
+    const a = new Float32Array(rb.getMappedRange()).slice();
+    rb.unmap();
+    rb.destroy();
+    return a;
+  }
+  async *generate(messages, { maxTokens = 1024, temperature = 0, stopIds = [151645, 151643] } = {}) {
+    const rt2 = this.rt, tokenizer = this.tokenizer;
+    const ids = tokenizer.encode(formatMessages(tokenizer, messages));
+    if (ids.length <= rt2.maxPrefillT) rt2.prefillBatch(ids);
+    else for (let p = 0; p < ids.length; p++) rt2.token(ids[p], p);
+    let pos = ids.length;
+    const emit = (id) => tokenizer.decode([id], { skip_special_tokens: true });
+    if (temperature > 0) {
+      let next = sample(await this.readLogits(), temperature);
+      for (let step = 0; step < maxTokens; step++) {
+        if (stopIds.includes(next)) break;
+        const d = emit(next);
+        if (d) yield d;
+        rt2.token(next, pos);
+        pos++;
+        next = sample(await this.readLogits(), temperature);
+      }
+      return;
+    }
+    const first = await rt2.argmaxLogits();
+    if (stopIds.includes(first)) return;
+    {
+      const d = emit(first);
+      if (d) yield d;
+    }
+    let emitted = 1;
+    while (emitted < maxTokens && pos < rt2.maxCtx) {
+      const K2 = Math.min(rt2.MAXBATCH, maxTokens - emitted, rt2.maxCtx - pos);
+      const batch = await rt2.decodeBatch(pos, K2);
+      pos += K2;
+      let stop = false;
+      for (const id of batch) {
+        if (stopIds.includes(id)) {
+          stop = true;
+          break;
+        }
+        const d = emit(id);
+        if (d) yield d;
+        emitted++;
+        if (emitted >= maxTokens) {
+          stop = true;
+          break;
+        }
+      }
+      if (stop) break;
+    }
+  }
+};
+
+// src/main.js
+var $2 = (id) => document.getElementById(id);
+var log = (m) => {
+  const s = $2("status");
+  if (s) s.textContent = m;
+  console.log("[harness]", m);
+};
+var SYS = `You are a senior bug bounty triage analyst. Read the submission and assign exactly ONE disposition from: valid_impactful, valid_low, corroborated_surge, likely_duplicate, out_of_scope, theoretical_no_poc, self_inflicted, accepted_risk, slop. Estimate severity_estimate (critical/high/medium/low/none). Think step by step, then output a SINGLE JSON object on the last line with keys: disposition, severity_estimate, is_duplicate_risk, reasoning, questions_for_researcher, confidence. Output only valid JSON for that object.`;
+var session = new ModelSession({ cfg: QWEN25_3B, log });
+var adapters = new AdapterRegistry();
+var generation = new GenerationController({ session, adapters, systemPrompt: SYS, log });
+async function loadWith(reader, label) {
+  await session.loadWith(reader, label);
+  $2("go").disabled = false;
+  $2("loraFile").disabled = false;
 }
-async function* generate(messages, { maxTokens = 1024, temperature = 0, stopIds = [151645, 151643] } = {}) {
-  let promptText;
-  try {
-    promptText = tokenizer.apply_chat_template(messages, { tokenize: false, add_generation_prompt: true });
-  } catch {
-    promptText = chatML(messages);
-  }
-  const ids = tokenizer.encode(promptText);
-  if (ids.length <= rt2.maxPrefillT) rt2.prefillBatch(ids);
-  else for (let p = 0; p < ids.length; p++) rt2.token(ids[p], p);
-  let pos = ids.length;
-  const emit = (id) => tokenizer.decode([id], { skip_special_tokens: true });
-  if (temperature > 0) {
-    let next = sample(await readLogits(), temperature);
-    for (let step = 0; step < maxTokens; step++) {
-      if (stopIds.includes(next)) break;
-      const d = emit(next);
-      if (d) yield d;
-      rt2.token(next, pos);
-      pos++;
-      next = sample(await readLogits(), temperature);
-    }
-    return;
-  }
-  const first = await rt2.argmaxLogits();
-  if (stopIds.includes(first)) return;
-  {
-    const d = emit(first);
-    if (d) yield d;
-  }
-  let emitted = 1;
-  while (emitted < maxTokens && pos < rt2.maxCtx) {
-    const K2 = Math.min(rt2.MAXBATCH, maxTokens - emitted, rt2.maxCtx - pos);
-    const batch = await rt2.decodeBatch(pos, K2);
-    pos += K2;
-    let stop = false;
-    for (const id of batch) {
-      if (stopIds.includes(id)) {
-        stop = true;
-        break;
-      }
-      const d = emit(id);
-      if (d) yield d;
-      emitted++;
-      if (emitted >= maxTokens) {
-        stop = true;
-        break;
-      }
-    }
-    if (stop) break;
-  }
+function addAdapterOption(name, modules, where) {
+  adapters.add(name, modules);
+  const opt = document.createElement("option");
+  opt.value = name;
+  opt.textContent = `${name} (${Object.keys(modules).length} modules${where ? ", " + where : ""})`;
+  $2("adapter").appendChild(opt);
+  $2("adapter").value = name;
+  log(`LoRA "${name}" loaded (${Object.keys(modules).length} modules) \u2014 Triage to hot-swap.`);
 }
 async function runTriage() {
-  if (!rt2) return;
   $2("go").disabled = true;
-  $2("out").textContent = "";
-  const node = document.createTextNode("");
-  $2("out").appendChild(node);
-  const adapterName = $2("adapter").value;
-  if (adapters[adapterName]) rt2.setLora(adapters[adapterName]);
-  else rt2.clearLora();
-  log(`generating (adapter=${adapterName})\u2026`);
-  const messages = [{ role: "system", content: SYS }, { role: "user", content: $2("report").value }];
-  const t0 = performance.now();
-  let n = 0;
-  for await (const delta of generate(messages, { maxTokens: rt2.maxCtx, temperature: 0 })) {
-    node.appendData(delta);
-    n++;
+  try {
+    await generation.runTriage({
+      adapterName: $2("adapter").value,
+      report: $2("report").value,
+      outputNode: $2("out")
+    });
+  } finally {
+    $2("go").disabled = false;
   }
-  const dt = (performance.now() - t0) / 1e3;
-  log(`done: ${n} tokens in ${dt.toFixed(1)}s (${(n / dt).toFixed(1)} tok/s) adapter=${adapterName}`);
-  $2("go").disabled = false;
+}
+async function fetchHfAdapterFiles(repo, token) {
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const grab = async (n) => {
+    const r = await fetch(`https://huggingface.co/${repo}/resolve/main/${n}`, { headers });
+    if (!r.ok) return null;
+    const buf = await r.arrayBuffer();
+    return { name: n, async text() {
+      return new TextDecoder().decode(buf);
+    }, async arrayBuffer() {
+      return buf;
+    } };
+  };
+  const st2 = await grab("adapters.safetensors") || await grab("adapter_model.safetensors");
+  if (!st2) throw new Error("no adapters.safetensors / adapter_model.safetensors in " + repo);
+  const cfg = await grab("adapter_config.json");
+  return cfg ? [st2, cfg] : [st2];
 }
 window.addEventListener("DOMContentLoaded", () => {
   $2("load").onclick = () => loadWith(urlReader($2("modelUrl").value.trim()), $2("modelUrl").value.trim()).catch((e) => {
@@ -36318,19 +36413,10 @@ window.addEventListener("DOMContentLoaded", () => {
     log("ERROR: " + e.message);
     console.error(e);
   });
-  const addAdapter = (name, modules, where) => {
-    adapters[name] = { modules };
-    const opt = document.createElement("option");
-    opt.value = name;
-    opt.textContent = `${name} (${Object.keys(modules).length} modules${where ? ", " + where : ""})`;
-    $2("adapter").appendChild(opt);
-    $2("adapter").value = name;
-    log(`LoRA "${name}" loaded (${Object.keys(modules).length} modules) \u2014 Triage to hot-swap.`);
-  };
   $2("loraFile").onchange = async (ev) => {
     try {
-      const { name, modules } = await loadLoraAdapterGPU(dev, [...ev.target.files], QWEN25_3B);
-      addAdapter(name, modules);
+      const { name, modules } = await loadLoraAdapterGPU(session.dev, [...ev.target.files], QWEN25_3B);
+      addAdapterOption(name, modules);
     } catch (e) {
       log("LoRA load error: " + e.message);
       console.error(e);
@@ -36338,27 +36424,14 @@ window.addEventListener("DOMContentLoaded", () => {
   };
   const hfLoraBtn = $2("loadHFLora");
   if (hfLoraBtn) hfLoraBtn.onclick = async () => {
-    if (!dev) return log("load a model first, then load a LoRA adapter");
+    if (!session.dev) return log("load a model first, then load a LoRA adapter");
     const repo = ($2("hfLora")?.value || "").trim();
     const token = ($2("hfToken")?.value || "").trim();
     if (!repo) return log("enter a Hugging Face LoRA adapter repo id");
     try {
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      const grab = async (n) => {
-        const r = await fetch(`https://huggingface.co/${repo}/resolve/main/${n}`, { headers });
-        if (!r.ok) return null;
-        const buf = await r.arrayBuffer();
-        return { name: n, async text() {
-          return new TextDecoder().decode(buf);
-        }, async arrayBuffer() {
-          return buf;
-        } };
-      };
-      const st2 = await grab("adapters.safetensors") || await grab("adapter_model.safetensors");
-      if (!st2) throw new Error("no adapters.safetensors / adapter_model.safetensors in " + repo);
-      const cfg = await grab("adapter_config.json");
-      const { name, modules } = await loadLoraAdapterGPU(dev, cfg ? [st2, cfg] : [st2], QWEN25_3B);
-      addAdapter(repo.split("/").pop() || name, modules, "HF");
+      const files = await fetchHfAdapterFiles(repo, token);
+      const { name, modules } = await loadLoraAdapterGPU(session.dev, files, QWEN25_3B);
+      addAdapterOption(repo.split("/").pop() || name, modules, "HF");
     } catch (e) {
       log("HF LoRA error: " + e.message + (token ? "" : " (private/gated? add a token)"));
       console.error(e);
