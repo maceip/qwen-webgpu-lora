@@ -24,6 +24,19 @@ window.run = async () => {
   bg = bg.slice(0, 16);
   console.log('VWG batch gen=' + JSON.stringify(bg));
   console.log('VWG batch match=' + (JSON.stringify(bg) === JSON.stringify(ref.gen_ids)));
+  // batched PREFILL must produce the SAME first token + continuation as sequential/HF
+  if (ids.length <= rt.maxPrefillT) {
+    rt.prefillBatch(ids);
+    const pf = await rt.argmaxLogits();
+    console.log('VWG prefill argmax=' + pf + ' (ref ' + ref.argmax + ') ' + (pf === ref.argmax ? 'OK' : 'MISMATCH'));
+    let pg = [pf], ppos = ids.length;
+    while (pg.length < 16) { const b = await rt.decodeBatch(ppos, Math.min(rt.MAXBATCH, 16 - pg.length)); ppos += b.length; pg.push(...b); }
+    console.log('VWG prefill gen match=' + (JSON.stringify(pg.slice(0, 16)) === JSON.stringify(ref.gen_ids)));
+    await dev.queue.onSubmittedWorkDone();
+    let a = performance.now(); for (let p = 0; p < ids.length; p++) rt.token(ids[p], p); await rt.argmaxLogits(); const seqMs = performance.now() - a;
+    a = performance.now(); rt.prefillBatch(ids); await rt.argmaxLogits(); const batMs = performance.now() - a;
+    console.log('VWG prefill(' + ids.length + ' tok) seq=' + seqMs.toFixed(0) + 'ms batched=' + batMs.toFixed(0) + 'ms (' + (seqMs / batMs).toFixed(1) + 'x faster TTFT)');
+  }
   await dev.queue.onSubmittedWorkDone(); const s0 = performance.now();
   for (let s = 0; s < 30; s++) { rt.token(nxt, pos); pos++; nxt = await rt.argmaxLogits(); }
   const dt = (performance.now() - s0) / 1000; console.log('VWG SPEED ' + (30 / dt).toFixed(1) + ' tok/s');

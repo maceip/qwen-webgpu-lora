@@ -65,7 +65,10 @@ async function* generate(messages, { maxTokens = 1024, temperature = 0.0, stopId
   try { promptText = tokenizer.apply_chat_template(messages, { tokenize: false, add_generation_prompt: true }); }
   catch { promptText = messages.map(m => `<|im_start|>${m.role}\n${m.content}<|im_end|>\n`).join('') + '<|im_start|>assistant\n'; }
   const ids = tokenizer.encode(promptText);
-  for (let p = 0; p < ids.length; p++) rt.token(ids[p], p);          // prefill (T=1 steps)
+  // prefill: batched (tiled GEMM, fast TTFT) for base model; sequential when a LoRA
+  // adapter is active (batched-prefill path is base-only) or the prompt exceeds maxPrefillT.
+  if (!rt.lora && ids.length <= rt.maxPrefillT) rt.prefillBatch(ids);
+  else for (let p = 0; p < ids.length; p++) rt.token(ids[p], p);
   let pos = ids.length;
   const emit = (id) => tokenizer.decode([id], { skip_special_tokens: true }); // byte-level BPE: per-token decode is exact for ASCII/JSON
 

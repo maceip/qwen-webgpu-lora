@@ -167,6 +167,51 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
   }
 }`;
 
+// Tiled int4 GEMM for PREFILL (T>1): Y[T][N] = A[T][K] @ dequant(W[N][K])^T (+bias).
+// Each workgroup computes a BM(tokens)×BN(cols) output tile; the A K-slice is staged
+// in shared memory so activations are reused across the BN columns (the naive
+// per-column kernel re-reads activations N times and is slower than sequential decode).
+export const GEMM4 = `
+struct Meta { K:u32, N:u32, T:u32, gpr:u32, hasBias:u32, p0:u32, p1:u32, p2:u32 };
+@group(0) @binding(0) var<storage,read> A: array<f32>;       // [T][K]
+@group(0) @binding(1) var<storage,read> W: array<u32>;       // [N][K/8] int4
+@group(0) @binding(2) var<storage,read> scale: array<f32>;   // [N][gpr]
+@group(0) @binding(3) var<storage,read> bias: array<f32>;    // [N] or dummy
+@group(0) @binding(4) var<storage,read_write> Y: array<f32>; // [T][N]
+@group(0) @binding(5) var<uniform> m: Meta;
+const BM = 16u; const BN = 64u;
+var<workgroup> As: array<f32, 128>;   // BM*8 — A staged for one 8-wide K chunk
+@compute @workgroup_size(64)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
+  let tTile = wid.y * BM; let col = wid.x * BN + lid.x; let valid = col < m.N;
+  let K8 = m.K/8u; let rb = col*K8;
+  var acc: array<f32, 16>;
+  for (var i = 0u; i < BM; i = i + 1u) { acc[i] = 0.0; }
+  for (var c = 0u; c < K8; c = c + 1u) {
+    for (var l = lid.x; l < BM*8u; l = l + 64u) {
+      let tt = l / 8u; let trow = tTile + tt;
+      As[l] = select(0.0, A[trow*m.K + c*8u + (l % 8u)], trow < m.T);
+    }
+    workgroupBarrier();
+    if (valid) {
+      let word = W[rb + c]; let sc = scale[col*m.gpr + ((c*8u) >> 7u)];
+      let w0=f32(i32(word<<28u)>>28u)*sc; let w1=f32(i32(word<<24u)>>28u)*sc;
+      let w2=f32(i32(word<<20u)>>28u)*sc; let w3=f32(i32(word<<16u)>>28u)*sc;
+      let w4=f32(i32(word<<12u)>>28u)*sc; let w5=f32(i32(word<<8u)>>28u)*sc;
+      let w6=f32(i32(word<<4u)>>28u)*sc;  let w7=f32(i32(word)>>28u)*sc;
+      for (var t = 0u; t < BM; t = t + 1u) {
+        let b = t*8u;
+        acc[t] = acc[t] + As[b]*w0+As[b+1u]*w1+As[b+2u]*w2+As[b+3u]*w3+As[b+4u]*w4+As[b+5u]*w5+As[b+6u]*w6+As[b+7u]*w7;
+      }
+    }
+    workgroupBarrier();
+  }
+  if (valid) {
+    let bv = select(0.0, bias[col], m.hasBias == 1u);
+    for (var t = 0u; t < BM; t = t + 1u) { let trow = tTile + t; if (trow < m.T) { Y[trow*m.N + col] = acc[t] + bv; } }
+  }
+}`;
+
 // y += a (elementwise)
 export const ADD = `
 @group(0) @binding(0) var<storage,read> a: array<f32>;
@@ -212,6 +257,84 @@ fn main(@builtin(global_invocation_id) g: vec3<u32>) {
   let v = unpack4xI8(w[id*(H/4u) + (k>>2u)]); let lane = k & 3u;
   var b: i32; if (lane==0u){b=v.x;} else if (lane==1u){b=v.y;} else if (lane==2u){b=v.z;} else {b=v.w;}
   out[k] = f32(b) * scale[id];
+}`;
+
+// ---- PREFILL (T>1) batched ops ----
+
+// RMSNorm over T rows (one workgroup per row).
+export const RMSNORM_T = `
+@group(0) @binding(0) var<storage,read> x: array<f32>;
+@group(0) @binding(1) var<storage,read> g: array<f32>;
+@group(0) @binding(2) var<storage,read_write> y: array<f32>;
+@group(0) @binding(3) var<uniform> m: vec2<f32>;   // K, eps
+var<workgroup> part: array<f32,256>;
+@compute @workgroup_size(256)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
+  let tid = lid.x; let K = u32(m.x); let base = wid.x * K;
+  var s = 0.0; for (var k = tid; k < K; k = k + 256u) { let v = x[base+k]; s = s + v*v; }
+  part[tid] = s; workgroupBarrier();
+  for (var t = 128u; t > 0u; t = t/2u) { if (tid < t) { part[tid] = part[tid] + part[tid+t]; } workgroupBarrier(); }
+  let inv = inverseSqrt(part[0]/m.x + m.y);
+  for (var k = tid; k < K; k = k + 256u) { y[base+k] = x[base+k]*inv*g[k]; }
+}`;
+
+// RoPE over T rows [T][nHeads*headDim]; row r is at absolute position pos0+r. Pair-wise (no race).
+export const ROPE_T = `
+@group(0) @binding(0) var<storage,read_write> x: array<f32>;
+@group(0) @binding(1) var<storage,read> cosT: array<f32>;
+@group(0) @binding(2) var<storage,read> sinT: array<f32>;
+@group(0) @binding(3) var<uniform> m: vec4<u32>;   // nHeads, headDim, T, pos0
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let g = gid.x; let H = m.x; let D = m.y; let T = m.z; let pos0 = m.w; let half = D/2u;
+  let perRow = H*half; if (g >= T*perRow) { return; }
+  let row = g / perRow; let r = g % perRow; let h = r / half; let j = r % half;
+  let rb = row*H*D; let lo = rb + h*D + j; let hi = lo + half; let off = (pos0+row)*D + j;
+  let c = cosT[off]; let s = sinT[off]; let xl = x[lo]; let xh = x[hi];
+  x[lo] = xl*c - xh*s; x[hi] = xh*c + xl*s;
+}`;
+
+// Embed T tokens: out[t][k] = dequant(embed[ids[t]])[k].
+export const EMBED_T = `
+@group(0) @binding(0) var<storage,read> w: array<u32>;
+@group(0) @binding(1) var<storage,read> scale: array<f32>;
+@group(0) @binding(2) var<storage,read_write> out: array<f32>;
+@group(0) @binding(3) var<storage,read> ids: array<u32>;
+@group(0) @binding(4) var<uniform> m: vec2<u32>;   // T, H
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let i = gid.x; let T = m.x; let H = m.y; if (i >= T*H) { return; }
+  let t = i / H; let k = i % H; let id = ids[t];
+  let v = unpack4xI8(w[id*(H/4u) + (k>>2u)]); let lane = k & 3u;
+  var b: i32; if (lane==0u){b=v.x;} else if (lane==1u){b=v.y;} else if (lane==2u){b=v.z;} else {b=v.w;}
+  out[i] = f32(b) * scale[id];
+}`;
+
+// Causal attention for prefill: query row t attends keys 0..t. One workgroup per (head, t).
+export const ATTN_PREFILL = `
+enable subgroups;
+@group(0) @binding(0) var<storage,read> q: array<f32>;       // [T][nHeads*hd]
+@group(0) @binding(1) var<storage,read> kc: array<f32>;      // [ctx][nKV*hd]
+@group(0) @binding(2) var<storage,read> vc: array<f32>;
+@group(0) @binding(3) var<storage,read_write> o: array<f32>; // [T][nHeads*hd]
+@group(0) @binding(4) var<uniform> m: vec4<u32>;             // nHeads, nKV, hd, T
+var<workgroup> sc: array<f32,2048>;
+var<workgroup> red: array<f32,64>;
+@compute @workgroup_size(256)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>,
+        @builtin(subgroup_size) sgsz: u32, @builtin(subgroup_invocation_id) sgid: u32) {
+  let h = wid.x; let t = wid.y; let tid = lid.x; let nHeads = m.x; let nKV = m.y; let hd = m.z;
+  let ctx = t + 1u; let kvh = h / (nHeads / nKV);
+  let qbase = t*nHeads*hd + h*hd; let stride = nKV*hd; let hoff = kvh*hd; let scale = 1.0/sqrt(f32(hd));
+  let nsg = (256u + sgsz - 1u) / sgsz;
+  var lmax = -1e30;
+  for (var k = tid; k < ctx; k = k + 256u) { var dot = 0.0; let kb = k*stride + hoff; for (var d = 0u; d < hd; d = d + 1u) { dot = dot + q[qbase+d]*kc[kb+d]; } let s = dot*scale; sc[k] = s; lmax = max(lmax, s); }
+  let sgm = subgroupMax(lmax); if (sgid == 0u) { red[tid/sgsz] = sgm; } workgroupBarrier();
+  var gmax = -1e30; for (var i = 0u; i < nsg; i = i + 1u) { gmax = max(gmax, red[i]); } workgroupBarrier();
+  var lsum = 0.0; for (var k = tid; k < ctx; k = k + 256u) { let e = exp(sc[k]-gmax); sc[k] = e; lsum = lsum + e; }
+  let sgs = subgroupAdd(lsum); if (sgid == 0u) { red[tid/sgsz] = sgs; } workgroupBarrier();
+  var Z = 0.0; for (var i = 0u; i < nsg; i = i + 1u) { Z = Z + red[i]; } let invZ = 1.0/Z; workgroupBarrier();
+  for (var d = tid; d < hd; d = d + 256u) { var acc = 0.0; for (var k = 0u; k < ctx; k = k + 1u) { acc = acc + sc[k]*vc[k*stride + hoff + d]; } o[qbase + d] = acc * invZ; }
 }`;
 
 // GPU argmax over logits -> out[0] = best index (one 4-byte readback instead of 608KB)

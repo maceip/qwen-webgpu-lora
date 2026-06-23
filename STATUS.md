@@ -74,12 +74,24 @@ Requires: WebGPU + `subgroups` device feature. Tested in Chrome Canary
 - `readers.js` (tf-free) underpins all of it; `build()` takes a reader or a URL.
 - Live demo: https://maceip.github.io/qwen-webgpu-lora/ (GitHub Pages, BYO model from HF).
 
-## Remaining headroom (optional / larger)
-- **Batched prefill (biggest TTFT win, larger effort):** prefill is currently sequential
-  T=1 (one decode step per prompt token → ~ctx×per-token before first output). A true
-  batched prefill needs T>1 GEMM kernels + causal-masked attention — effectively a second
-  forward path. Deferred to keep the shipped decode runtime stable.
-- attnC combine runs nHeads workgroups (low occupancy, ~4%); could fuse into attnP.
-- **WebNN second backend (future):** `navigator.ml` not yet exposed in tested Canary;
-  hot-swap survivable via graph inputs, potential ANE access. App/tokenizer/LoRA layers
-  are already backend-agnostic, so it'd be isolated to a `QwenWebNN` sibling of `QwenWGPU`.
+## Batched prefill (done)
+Prefill now processes the whole prompt in one pass via a **tiled int4 GEMM** (`GEMM4`,
+BM=16 tokens × BN=64 cols, A K-slice staged in shared memory so activations are reused
+across columns — the naive per-column kernel re-reads activations N× and is *slower*
+than sequential). New T>1 kernels: `GEMM4`, `RMSNORM_T`, `ROPE_T`, `EMBED_T`,
+`ATTN_PREFILL` (causal); `ADD`/`SILUMUL` reused elementwise; lm_head on the last row
+reuses the decode GEMV. `prefillBatch(ids)` is bit-exact (validated: prefill argmax 4913
++ decode continuation == ref.gen_ids). GEMM verified standalone vs CPU (max err 2.5e-6).
+TTFT 3.1× faster on the 18-token ref prompt (larger win at realistic prompt lengths).
+Base-model only — when a LoRA adapter is active the app falls back to sequential prefill
+(the proven, adapter-correct path); prompts > maxPrefillT (512) also fall back.
+
+## Not pursued (with reasons)
+- **attnC fusion:** not possible. Split-K's combine needs every split's partial first,
+  and WebGPU's only cross-workgroup barrier is a separate dispatch. The one skippable
+  case (nsplit==1, ctx≤128) is where attnC is already near-free; the ~4% is at long
+  context where the combine is mandatory — it's the cost of the occupancy win that took
+  attention 18ms→5ms (net hugely positive).
+- **WebNN backend:** `navigator.ml` not exposed in tested Canary; a future second backend
+  (hot-swap survivable via graph inputs, potential ANE access). App/tokenizer/LoRA layers
+  are already backend-agnostic, so it'd be a `QwenWebNN` sibling of `QwenWGPU`.
