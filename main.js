@@ -4,7 +4,7 @@
 import { QwenWGPU } from './qwgpu/runtime.js';
 import { QWEN25_3B } from './config.js';
 import { loadLoraAdapterGPU } from './lora_gpu.js';
-import { urlReader, hfReader } from './readers.js';
+import { urlReader, hfReader, fileReader } from './readers.js';
 
 const $ = id => document.getElementById(id);
 const log = (m) => { const s = $('status'); if (s) s.textContent = m; console.log('[harness]', m); };
@@ -120,15 +120,36 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!repo) return log('enter a Hugging Face repo id, e.g. WeiboAI/VibeThinker-3B');
     loadWith(hfReader(repo, token), 'HF: ' + repo).catch(e => { log('ERROR: ' + e.message + ' (private/gated repo? add a token)'); console.error(e); });
   };
+  const mf = $('modelFiles');
+  if (mf) mf.onchange = (ev) => {
+    const files = [...ev.target.files]; if (!files.length) return;
+    const map = {}; for (const f of files) map[f.name] = f;   // fileReader picks by basename
+    loadWith(fileReader(map), `${files.length} local files`).catch(e => { log('ERROR: ' + e.message); console.error(e); });
+  };
   $('go').onclick = () => runTriage().catch(e => { log('ERROR: ' + e.message); console.error(e); });
+  const addAdapter = (name, modules, where) => {
+    adapters[name] = { modules };
+    const opt = document.createElement('option'); opt.value = name; opt.textContent = `${name} (${Object.keys(modules).length} modules${where ? ', ' + where : ''})`;
+    $('adapter').appendChild(opt); $('adapter').value = name;
+    log(`LoRA "${name}" loaded (${Object.keys(modules).length} modules) — Triage to hot-swap.`);
+  };
   $('loraFile').onchange = async (ev) => {
-    const files = [...ev.target.files];
+    try { const { name, modules } = await loadLoraAdapterGPU(dev, [...ev.target.files], QWEN25_3B); addAdapter(name, modules); }
+    catch (e) { log('LoRA load error: ' + e.message); console.error(e); }
+  };
+  const hfLoraBtn = $('loadHFLora');
+  if (hfLoraBtn) hfLoraBtn.onclick = async () => {
+    if (!dev) return log('load a model first, then load a LoRA adapter');
+    const repo = ($('hfLora')?.value || '').trim(); const token = ($('hfToken')?.value || '').trim();
+    if (!repo) return log('enter a Hugging Face LoRA adapter repo id');
     try {
-      const { name, modules } = await loadLoraAdapterGPU(dev, files, QWEN25_3B);
-      adapters[name] = { modules };
-      const opt = document.createElement('option'); opt.value = name; opt.textContent = name + ' (' + Object.keys(modules).length + ' modules)';
-      $('adapter').appendChild(opt); $('adapter').value = name;
-      log(`LoRA "${name}" loaded (${Object.keys(modules).length} modules) — select + Triage to hot-swap.`);
-    } catch (e) { log('LoRA load error: ' + e.message); console.error(e); }
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const grab = async (n) => { const r = await fetch(`https://huggingface.co/${repo}/resolve/main/${n}`, { headers }); if (!r.ok) return null; const buf = await r.arrayBuffer(); return { name: n, async text() { return new TextDecoder().decode(buf); }, async arrayBuffer() { return buf; } }; };
+      const st = (await grab('adapters.safetensors')) || (await grab('adapter_model.safetensors'));
+      if (!st) throw new Error('no adapters.safetensors / adapter_model.safetensors in ' + repo);
+      const cfg = await grab('adapter_config.json');
+      const { name, modules } = await loadLoraAdapterGPU(dev, cfg ? [st, cfg] : [st], QWEN25_3B);
+      addAdapter(repo.split('/').pop() || name, modules, 'HF');
+    } catch (e) { log('HF LoRA error: ' + e.message + (token ? '' : ' (private/gated? add a token)')); console.error(e); }
   };
 });

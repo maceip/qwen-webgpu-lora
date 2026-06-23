@@ -34,6 +34,8 @@
 <div class="row">
   <input id="modelUrl" type="text" value="/model">
   <button id="load">Load (same-origin)</button>
+  <span style="color:#9ad;font-size:12px">or local folder:</span>
+  <input id="modelFiles" type="file" webkitdirectory multiple>
 </div>
 <div id="status">idle.</div>
 
@@ -41,7 +43,11 @@
 <div class="row">
   <select id="adapter"><option value="none">none (base / merged)</option></select>
   <input id="loraFile" type="file" multiple disabled accept=".safetensors,.json">
-  <span style="color:#9ad;font-size:12px">load adapter_config.json + adapter .safetensors → appears in dropdown → Triage to hot-swap</span>
+  <span style="color:#9ad;font-size:12px">load adapter files → dropdown → Triage to hot-swap</span>
+</div>
+<div class="row">
+  <input id="hfLora" type="text" placeholder="…or a Hugging Face LoRA repo id (PEFT or MLX)">
+  <button id="loadHFLora">Load LoRA from HF</button>
 </div>
 
 <h3>Researcher submission</h3>

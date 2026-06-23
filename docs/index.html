@@ -56,14 +56,19 @@
   <input id="hfToken" type="password" placeholder="HF token (only for gated/private)" style="flex:0 0 220px; min-width:0">
   <button id="loadHF">Load from Hugging Face</button>
 </div>
-<div class="row" style="font-size:12px; color:#9aa4b2">…or same-origin:&nbsp; <input id="modelUrl" type="text" value="/model" style="max-width:150px; min-width:0"> <button id="load" style="padding:5px 10px">Load</button></div>
+<div class="row" style="font-size:12px; color:#9aa4b2">…or same-origin:&nbsp; <input id="modelUrl" type="text" value="/model" style="max-width:150px; min-width:0"> <button id="load" style="padding:5px 10px">Load</button>
+  &nbsp;·&nbsp; or local folder (fully offline): <input id="modelFiles" type="file" webkitdirectory multiple style="font-size:12px"></div>
 <div id="status">idle — pick a model and load. The first load streams several GB from Hugging Face.</div>
 
-<h3>LoRA adapter (optional)</h3>
+<h3>LoRA adapter (optional) — hot-swap live</h3>
 <div class="row">
   <select id="adapter"><option value="none">none (base)</option></select>
   <input id="loraFile" type="file" multiple disabled accept=".safetensors,.json">
-  <span style="color:#9aa4b2;font-size:12px">drop adapter_config.json + adapters.safetensors → appears in dropdown → Triage to hot-swap live</span>
+  <span style="color:#9aa4b2;font-size:12px">drop adapter_config.json + adapters.safetensors</span>
+</div>
+<div class="row">
+  <input id="hfLora" type="text" placeholder="…or a Hugging Face LoRA repo id (PEFT or MLX)">
+  <button id="loadHFLora">Load LoRA from HF</button>
 </div>
 
 <h3>Researcher submission</h3>

@@ -35027,6 +35027,21 @@ function urlReader(baseUrl, headers = {}) {
 function hfReader(repo, token = "", rev = "main") {
   return urlReader(`https://huggingface.co/${repo}/resolve/${rev}`, token ? { Authorization: `Bearer ${token}` } : {});
 }
+function fileReader(fileMap) {
+  const pick2 = (path) => fileMap[path] || fileMap[path.split("/").pop()];
+  return {
+    async range(path, start, end) {
+      const f = pick2(path);
+      if (!f) throw new Error(`file not provided: ${path}`);
+      return await f.slice(start, end).arrayBuffer();
+    },
+    async text(path) {
+      const f = pick2(path);
+      if (!f) throw new Error(`file not provided: ${path}`);
+      return await f.text();
+    }
+  };
+}
 
 // qwgpu/runtime.js
 var STORAGE = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
@@ -35644,23 +35659,64 @@ window.addEventListener("DOMContentLoaded", () => {
       console.error(e);
     });
   };
+  const mf = $2("modelFiles");
+  if (mf) mf.onchange = (ev) => {
+    const files = [...ev.target.files];
+    if (!files.length) return;
+    const map = {};
+    for (const f of files) map[f.name] = f;
+    loadWith(fileReader(map), `${files.length} local files`).catch((e) => {
+      log("ERROR: " + e.message);
+      console.error(e);
+    });
+  };
   $2("go").onclick = () => runTriage().catch((e) => {
     log("ERROR: " + e.message);
     console.error(e);
   });
+  const addAdapter = (name, modules, where) => {
+    adapters[name] = { modules };
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = `${name} (${Object.keys(modules).length} modules${where ? ", " + where : ""})`;
+    $2("adapter").appendChild(opt);
+    $2("adapter").value = name;
+    log(`LoRA "${name}" loaded (${Object.keys(modules).length} modules) \u2014 Triage to hot-swap.`);
+  };
   $2("loraFile").onchange = async (ev) => {
-    const files = [...ev.target.files];
     try {
-      const { name, modules } = await loadLoraAdapterGPU(dev, files, QWEN25_3B);
-      adapters[name] = { modules };
-      const opt = document.createElement("option");
-      opt.value = name;
-      opt.textContent = name + " (" + Object.keys(modules).length + " modules)";
-      $2("adapter").appendChild(opt);
-      $2("adapter").value = name;
-      log(`LoRA "${name}" loaded (${Object.keys(modules).length} modules) \u2014 select + Triage to hot-swap.`);
+      const { name, modules } = await loadLoraAdapterGPU(dev, [...ev.target.files], QWEN25_3B);
+      addAdapter(name, modules);
     } catch (e) {
       log("LoRA load error: " + e.message);
+      console.error(e);
+    }
+  };
+  const hfLoraBtn = $2("loadHFLora");
+  if (hfLoraBtn) hfLoraBtn.onclick = async () => {
+    if (!dev) return log("load a model first, then load a LoRA adapter");
+    const repo = ($2("hfLora")?.value || "").trim();
+    const token = ($2("hfToken")?.value || "").trim();
+    if (!repo) return log("enter a Hugging Face LoRA adapter repo id");
+    try {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const grab = async (n) => {
+        const r = await fetch(`https://huggingface.co/${repo}/resolve/main/${n}`, { headers });
+        if (!r.ok) return null;
+        const buf = await r.arrayBuffer();
+        return { name: n, async text() {
+          return new TextDecoder().decode(buf);
+        }, async arrayBuffer() {
+          return buf;
+        } };
+      };
+      const st2 = await grab("adapters.safetensors") || await grab("adapter_model.safetensors");
+      if (!st2) throw new Error("no adapters.safetensors / adapter_model.safetensors in " + repo);
+      const cfg = await grab("adapter_config.json");
+      const { name, modules } = await loadLoraAdapterGPU(dev, cfg ? [st2, cfg] : [st2], QWEN25_3B);
+      addAdapter(repo.split("/").pop() || name, modules, "HF");
+    } catch (e) {
+      log("HF LoRA error: " + e.message + (token ? "" : " (private/gated? add a token)"));
       console.error(e);
     }
   };
