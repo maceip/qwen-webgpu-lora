@@ -224,7 +224,7 @@ export class QwenWGPU {
       .sort((a, b) => a - b);
     const rows = [];
     const resetTokens = candidates.length ? Math.max(...candidates) : 0;
-    let selected = this.MAXBATCH, best = Infinity;
+    let selected = candidates[0] ?? this.MAXBATCH, best = Infinity;
     try {
       for (const k of candidates) {
         await this._resetAutotuneDecodeState(resetTokens);

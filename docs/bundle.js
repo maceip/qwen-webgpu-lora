@@ -36064,7 +36064,7 @@ var QwenWGPU = class {
     const candidates = [...new Set(this.decodeBatchCandidates)].filter((k2) => k2 >= 1 && k2 <= this.decodeBatchCapacity && k2 <= this.maxCtx).sort((a, b) => a - b);
     const rows = [];
     const resetTokens = candidates.length ? Math.max(...candidates) : 0;
-    let selected = this.MAXBATCH, best = Infinity;
+    let selected = candidates[0] ?? this.MAXBATCH, best = Infinity;
     try {
       for (const k2 of candidates) {
         await this._resetAutotuneDecodeState(resetTokens);
