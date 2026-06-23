@@ -37,7 +37,7 @@ export class QwenWGPU {
     const dev = this.dev, c = this.cfg;
     this.CHUNK = 128; this.MAXBATCH = 16; this.maxPrefillT = 512;
     this.pipes = { gemv: this._pipe(GEMV), loraA: this._pipe(LORA_A), rms: this._pipe(RMSNORM), rope: this._pipe(ROPE), attnP: this._pipe(ATTN_PARTIAL), attnC: this._pipe(ATTN_COMBINE), add: this._pipe(ADD), silu: this._pipe(SILUMUL), embed: this._pipe(EMBED), embedBuf: this._pipe(EMBED_BUF), argmax: this._pipe(ARGMAX), gemv4: this._pipe(GEMV4),
-      gemm4: this._pipe(GEMM4), rmsT: this._pipe(RMSNORM_T), ropeT: this._pipe(ROPE_T), embedT: this._pipe(EMBED_T), attnPrefill: this._pipe(ATTN_PREFILL) };
+      gemm4: this._pipe(GEMM4), rmsT: this._pipe(RMSNORM_T), ropeT: this._pipe(ROPE_T), embedT: this._pipe(EMBED_T), attnPrefill: this._pipe(ATTN_PREFILL(this.maxPrefillT)) };
     onProgress('loading f32 weights', 0);
     const W = await this._loadRaw(source, onProgress);
     onProgress('quantizing to int8 + uploading', 0.5);

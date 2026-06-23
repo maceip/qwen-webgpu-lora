@@ -34974,14 +34974,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var b: i32; if (lane==0u){b=v.x;} else if (lane==1u){b=v.y;} else if (lane==2u){b=v.z;} else {b=v.w;}
   out[i] = f32(b) * scale[id];
 }`;
-var ATTN_PREFILL = `
+var ATTN_PREFILL = (maxT = 2048) => `
 enable subgroups;
 @group(0) @binding(0) var<storage,read> q: array<f32>;       // [T][nHeads*hd]
 @group(0) @binding(1) var<storage,read> kc: array<f32>;      // [ctx][nKV*hd]
 @group(0) @binding(2) var<storage,read> vc: array<f32>;
 @group(0) @binding(3) var<storage,read_write> o: array<f32>; // [T][nHeads*hd]
 @group(0) @binding(4) var<uniform> m: vec4<u32>;             // nHeads, nKV, hd, T
-var<workgroup> sc: array<f32,2048>;
+var<workgroup> sc: array<f32,${maxT}>;
 var<workgroup> red: array<f32,64>;
 @compute @workgroup_size(256)
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>,
@@ -35219,7 +35219,7 @@ var QwenWGPU = class {
       rmsT: this._pipe(RMSNORM_T),
       ropeT: this._pipe(ROPE_T),
       embedT: this._pipe(EMBED_T),
-      attnPrefill: this._pipe(ATTN_PREFILL)
+      attnPrefill: this._pipe(ATTN_PREFILL(this.maxPrefillT))
     };
     onProgress("loading f32 weights", 0);
     const W = await this._loadRaw(source, onProgress);

@@ -311,14 +311,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }`;
 
 // Causal attention for prefill: query row t attends keys 0..t. One workgroup per (head, t).
-export const ATTN_PREFILL = `
+// sc holds scores for keys 0..ctx-1; ctx <= T <= maxPrefillT, so sc is sized to maxPrefillT
+// (passed in) — keeping the array size and the prompt cap in lockstep (no silent OOB).
+export const ATTN_PREFILL = (maxT = 2048) => `
 enable subgroups;
 @group(0) @binding(0) var<storage,read> q: array<f32>;       // [T][nHeads*hd]
 @group(0) @binding(1) var<storage,read> kc: array<f32>;      // [ctx][nKV*hd]
 @group(0) @binding(2) var<storage,read> vc: array<f32>;
 @group(0) @binding(3) var<storage,read_write> o: array<f32>; // [T][nHeads*hd]
 @group(0) @binding(4) var<uniform> m: vec4<u32>;             // nHeads, nKV, hd, T
-var<workgroup> sc: array<f32,2048>;
+var<workgroup> sc: array<f32,${maxT}>;
 var<workgroup> red: array<f32,64>;
 @compute @workgroup_size(256)
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>,
