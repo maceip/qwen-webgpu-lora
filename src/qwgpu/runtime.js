@@ -199,16 +199,35 @@ export class QwenWGPU {
     return Math.max(0, Math.min(interactive, remaining, this.maxCtx - pos, this.decodeBatchCapacity));
   }
 
+  async _resetAutotuneDecodeState(tokens, seedTokenId = 0) {
+    const c = this.cfg, S = this.s, H = c.hiddenSize, hd = c.headDim, qd = c.numHeads * hd, kvd = c.numKVHeads * hd, I = c.intermediateSize;
+    const nsplitMax = Math.ceil(this.maxCtx / this.CHUNK);
+    const touchedTokens = Math.min(Math.max(0, Math.floor(tokens)), this.maxCtx);
+    const enc = this.dev.createCommandEncoder();
+    const clear = (buf, bytes) => { if (bytes > 0) enc.clearBuffer(buf, 0, bytes); };
+
+    clear(S.hidden, H * 4); clear(S.normed, H * 4); clear(S.q, qd * 4); clear(S.k, kvd * 4); clear(S.v, kvd * 4);
+    clear(S.attn, qd * 4); clear(S.tmp, Math.max(qd, I) * 4); clear(S.tmp2, I * 4); clear(S.logits, c.vocabSize * 4);
+    clear(S.loraD, 256 * 4); clear(S.idsBuf, this.decodeBatchCapacity * 4);
+    clear(S.pm, c.numHeads * nsplitMax * 4); clear(S.pz, c.numHeads * nsplitMax * 4); clear(S.po, c.numHeads * nsplitMax * hd * 4);
+    const kvBytes = touchedTokens * kvd * 4;
+    for (let i = 0; i < c.numLayers; i++) { clear(this.kc[i], kvBytes); clear(this.vc[i], kvBytes); }
+
+    this.dev.queue.submit([enc.finish()]);
+    this.dev.queue.writeBuffer(S.amax, 0, new Uint32Array([seedTokenId]));
+    if (this.dev.queue.onSubmittedWorkDone) await this.dev.queue.onSubmittedWorkDone();
+  }
+
   async autotuneDecodeBatch() {
     const candidates = [...new Set(this.decodeBatchCandidates)]
       .filter(k => k >= 1 && k <= this.decodeBatchCapacity && k <= this.maxCtx)
       .sort((a, b) => a - b);
     const rows = [];
+    const resetTokens = candidates.length ? Math.max(...candidates) : 0;
     let selected = this.MAXBATCH, best = Infinity;
     try {
       for (const k of candidates) {
-        this.dev.queue.writeBuffer(this.s.amax, 0, new Uint32Array([0]));
-        await this.dev.queue.onSubmittedWorkDone?.();
+        await this._resetAutotuneDecodeState(resetTokens);
         const t0 = performance.now();
         await this.decodeGreedyBatch(0, k);
         const ms = performance.now() - t0;
@@ -219,9 +238,13 @@ export class QwenWGPU {
       }
       if (!rows.some(r => r.k === selected) && rows.length) selected = rows.reduce((a, b) => a.msPerToken <= b.msPerToken ? a : b).k;
       this.MAXBATCH = selected;
-      this.decodeBatchTuning = { selected, candidates: rows, reason: 'auto wall-clock decodeGreedyBatch' };
+      this.decodeBatchTuning = { selected, candidates: rows, reason: 'auto wall-clock decodeGreedyBatch with reset state' };
     } catch (e) {
       this.decodeBatchTuning = { selected: this.MAXBATCH, candidates: rows, reason: `auto failed: ${e.message}` };
+    } finally {
+      if (resetTokens > 0) {
+        try { await this._resetAutotuneDecodeState(resetTokens); } catch {}
+      }
     }
     return this.decodeBatchTuning;
   }
