@@ -97,6 +97,19 @@ than sequential). T>1 kernels: `GEMM4`, `RMSNORM_T` (one wg/row), `ROPE_T`, `EMB
 - Base-model only — LoRA-active prefill falls back to sequential (proven adapter-correct
   path). Decode stops at maxCtx (KV-cache guard).
 
+## Verified against the VibeThinker-3B repo (no runtime surprises)
+- **Config matches** `QWEN25_3B` exactly: hidden 2048 / 36 layers / 16 heads / 2 KV / inter 11008 /
+  vocab 151936 / rope_theta 1e6 / rms_eps 1e-6 / head_dim 128 / tied embeddings / qkv-bias-only / silu.
+- **`use_sliding_window: false`** → our FULL attention is correct at *every* context length (no SWA
+  divergence past 32K). `sliding_window`/`max_window_layers` are inert.
+- **Chat template** is standard Qwen ChatML; the app uses `apply_chat_template` when available and
+  otherwise a faithful reimplementation (`chatML()`) that injects the default system prompt exactly
+  like the template — identical output for the system+user prompts the app sends.
+- **EOS/stop**: model eos = 151643 (`<|endoftext|>`); we stop on `[151645 (<|im_end|>), 151643]`. No BOS prepend (`add_bos_token: false`).
+- **≥20 tok/s holds at all contexts**: raw decode measured 76/82/75/**68** tok/s at ctx ≈ 2k/4k/6k/7.8k;
+  full app (with streaming) 35–65 tok/s. decodeBatch clamps K to maxCtx (can't overrun the KV cache).
+- App `maxTokens` = `maxCtx` so long reasoning isn't truncated mid-thought (EOS / KV guard terminate).
+
 ## Not pursued (with reasons)
 - **attnC fusion:** not possible. Split-K's combine needs every split's partial first,
   and WebGPU's only cross-workgroup barrier is a separate dispatch. The one skippable

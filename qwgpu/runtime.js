@@ -233,6 +233,8 @@ export class QwenWGPU {
   // tokens in ONE submit (no per-token CPU sync), reads back K ids once. Assumes
   // s.amax holds the current token to embed. Returns the K generated ids.
   async decodeBatch(startPos, K) {
+    K = Math.min(K, this.maxCtx - startPos);   // never write KV past the cache
+    if (K <= 0) return [];
     this._resetUni();
     const enc = this.dev.createCommandEncoder();
     for (let k = 0; k < K; k++) {

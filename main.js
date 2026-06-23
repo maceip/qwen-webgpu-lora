@@ -60,10 +60,18 @@ function sample(logits, temperature) {
   let r = Math.random() * sum, c = 0; for (let i = 0; i < p.length; i++) { c += p[i]; if (r <= c) return i; } return p.length - 1;
 }
 
+// Faithful Qwen2.5 ChatML (matches VibeThinker-3B's chat_template for non-tool messages,
+// incl. injecting the default system prompt when none is given). Used as the fallback when
+// the tokenizer has no embedded chat_template (e.g. it lives in a separate chat_template.jinja).
+function chatML(messages) {
+  let s = (messages[0]?.role === 'system') ? '' : '<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n';
+  for (const m of messages) s += `<|im_start|>${m.role}\n${m.content}<|im_end|>\n`;
+  return s + '<|im_start|>assistant\n';
+}
 async function* generate(messages, { maxTokens = 1024, temperature = 0.0, stopIds = [151645, 151643] } = {}) {
   let promptText;
   try { promptText = tokenizer.apply_chat_template(messages, { tokenize: false, add_generation_prompt: true }); }
-  catch { promptText = messages.map(m => `<|im_start|>${m.role}\n${m.content}<|im_end|>\n`).join('') + '<|im_start|>assistant\n'; }
+  catch { promptText = chatML(messages); }
   const ids = tokenizer.encode(promptText);
   // prefill: batched (tiled GEMM, fast TTFT) for base model; sequential when a LoRA
   // adapter is active (batched-prefill path is base-only) or the prompt exceeds maxPrefillT.
@@ -108,7 +116,8 @@ async function runTriage() {
   log(`generating (adapter=${adapterName})…`);
   const messages = [{ role: 'system', content: SYS }, { role: 'user', content: $('report').value }];
   const t0 = performance.now(); let n = 0;
-  for await (const delta of generate(messages, { maxTokens: 4096, temperature: 0.0 })) { node.appendData(delta); n++; }
+  // reasoning model thinks long; let it use the context window (decode stops at EOS or maxCtx).
+  for await (const delta of generate(messages, { maxTokens: rt.maxCtx, temperature: 0.0 })) { node.appendData(delta); n++; }
   const dt = (performance.now() - t0) / 1000;
   log(`done: ${n} tokens in ${dt.toFixed(1)}s (${(n / dt).toFixed(1)} tok/s) adapter=${adapterName}`);
   $('go').disabled = false;

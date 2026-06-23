@@ -35546,6 +35546,8 @@ var QwenWGPU = class {
   // tokens in ONE submit (no per-token CPU sync), reads back K ids once. Assumes
   // s.amax holds the current token to embed. Returns the K generated ids.
   async decodeBatch(startPos, K2) {
+    K2 = Math.min(K2, this.maxCtx - startPos);
+    if (K2 <= 0) return [];
     this._resetUni();
     const enc = this.dev.createCommandEncoder();
     for (let k2 = 0; k2 < K2; k2++) {
@@ -35810,14 +35812,19 @@ function sample(logits, temperature) {
   }
   return p.length - 1;
 }
+function chatML(messages) {
+  let s = messages[0]?.role === "system" ? "" : "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n";
+  for (const m of messages) s += `<|im_start|>${m.role}
+${m.content}<|im_end|>
+`;
+  return s + "<|im_start|>assistant\n";
+}
 async function* generate(messages, { maxTokens = 1024, temperature = 0, stopIds = [151645, 151643] } = {}) {
   let promptText;
   try {
     promptText = tokenizer.apply_chat_template(messages, { tokenize: false, add_generation_prompt: true });
   } catch {
-    promptText = messages.map((m) => `<|im_start|>${m.role}
-${m.content}<|im_end|>
-`).join("") + "<|im_start|>assistant\n";
+    promptText = chatML(messages);
   }
   const ids = tokenizer.encode(promptText);
   if (!rt2.lora && ids.length <= rt2.maxPrefillT) rt2.prefillBatch(ids);
@@ -35877,7 +35884,7 @@ async function runTriage() {
   const messages = [{ role: "system", content: SYS }, { role: "user", content: $2("report").value }];
   const t0 = performance.now();
   let n = 0;
-  for await (const delta of generate(messages, { maxTokens: 4096, temperature: 0 })) {
+  for await (const delta of generate(messages, { maxTokens: rt2.maxCtx, temperature: 0 })) {
     node.appendData(delta);
     n++;
   }
