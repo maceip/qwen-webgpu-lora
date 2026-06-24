@@ -1450,6 +1450,24 @@ export class QwenWGPU {
       this._argmaxReadBusy = false;
     }
   }
+
+  // Convenience for numeric comparison harnesses (Phase 3 f16 eval etc.).
+  // Returns a fresh Float32Array copy of the current final logits buffer.
+  async readLogits() {
+    const n = this.cfg.vocabSize;
+    if (!this._logitsRead) {
+      this._logitsRead = this._buf(n * 4, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
+    }
+    const enc = this.dev.createCommandEncoder();
+    enc.copyBufferToBuffer(this.s.logits, 0, this._logitsRead, 0, n * 4);
+    this.dev.queue.submit([enc.finish()]);
+    if (this.dev.queue.onSubmittedWorkDone) await this.dev.queue.onSubmittedWorkDone();
+    await this._logitsRead.mapAsync(GPUMapMode.READ);
+    const out = new Float32Array(this._logitsRead.getMappedRange()).slice();
+    this._logitsRead.unmap();
+    return out;
+  }
+
   async topKLogits(k = this.samplingTopK) {
     if (this._topKReadBusy) throw new Error('topKLogits() is already in flight; concurrent sampling is not supported');
     this._topKReadBusy = true;

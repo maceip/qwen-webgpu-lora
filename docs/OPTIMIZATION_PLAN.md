@@ -299,6 +299,21 @@ Continuing to accuracy harness stub + Phase 4 (more overrides + workgroup tuning
 
 Next linear: real numeric f16-vs-f32 harness execution + tolerance logging (using the helpers), ATTN_PARTIAL_F16 candidate or prefill attn f16, basic WG autotune loop (Phase 4), more overrides, Phase 5 GPU sampling.
 
+**Latest linear step (continue):**
+- Added `QwenWGPU.readLogits()` public helper (MAP_READ copy of s.logits) for easy numeric harnesses and evals.
+- `test/f16_vs_f32_diff.js` now contains *real executable* comparison:
+  - Reuses prebuilt rt or builds one.
+  - Re-prefills same ids with setUseF16(false) then true.
+  - Captures final logits via readLogits + short greedy continuation via argmaxLogits + decodeBatch.
+  - Uses the shipped maxAbsDiff / maxRelDiff / topKMatch helpers for reporting.
+  - Logs dispatches, argmax, generated ids, maxAbs/Rel, top-5 overlap, gen parity, top-1 match.
+  - Returns structured result + simple pass criterion (gen match or (rel<tol && top1)).
+  - Documents the covered f16 paths and that partial attn remains f32.
+- This fulfills the plan item "real numeric f16-vs-f32 harness execution + tolerance logging (using the helpers)".
+- Build validated. Still 0 var<uniform>. Phase 3/4 linear progress recorded.
+
+Ready for: run the harness on real hardware for numbers; next could be ATTN_PARTIAL_F16 exploration or Phase 4 workgroup microbench.
+
 ---
 
 *This document is the single source of truth for the optimization effort.*

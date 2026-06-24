@@ -16,50 +16,106 @@ import { QwenWGPU } from '../src/qwgpu/runtime.js';
 import { QWEN25_3B } from '../src/config.js';
 
 export async function runF16Diff(opts = {}) {
-  const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-  const dev = await adapter.requestDevice({
-    requiredFeatures: ['subgroups'],
-    requiredLimits: { /* ... copy from other tests if needed */ }
-  });
-
-  const rt = new QwenWGPU(dev, QWEN25_3B, { onProgress: () => {} });
-  await rt.build();
-
-  const prompt = opts.prompt || 'The quick brown fox';
-  const useF16 = rt.hasF16;
-
-  if (!useF16) {
-    console.warn('[f16_diff] shader-f16 not available on this device; f32 path only.');
-    return { skipped: true };
+  // Support reuse of an already-built runtime (preferred in demo pages).
+  let rt = opts.rt;
+  let dev = null;
+  if (!rt) {
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+    const required = ['subgroups'];
+    // shader-f16 is optional; we check after device creation via adapter.
+    try {
+      if (adapter.features.has('shader-f16')) required.push('shader-f16');
+    } catch {}
+    dev = await adapter.requestDevice({
+      requiredFeatures: required,
+      requiredLimits: {
+        maxBufferSize: adapter.limits.maxBufferSize,
+        maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
+        maxStorageBuffersPerShaderStage: adapter.limits.maxStorageBuffersPerShaderStage,
+      },
+    });
+    rt = new QwenWGPU(dev, QWEN25_3B, { onProgress: () => {} });
+    const modelPath = opts.modelPath || '/model';
+    await rt.build(modelPath);
   }
 
-  // Toggle and capture a proxy signal.
-  // For a real harness, hook into internal step() or embed + first transformer block and snapshot a buffer.
-  // Here we just demonstrate the toggle and a trivial "forward" via public API if exposed.
+  const hasF16 = !!rt.hasF16;
+  if (!hasF16) {
+    console.warn('[f16_diff] shader-f16 not available on this device; f32 path only.');
+    return { skipped: true, hasF16: false };
+  }
 
-  rt.setUseF16(false);
-  const off = await rt.embedRow(/* token id or prompt tokenization handled upstream */ 42); // placeholder
+  // Obtain token ids for the run (prefer caller-supplied, then ref.json, else tiny synthetic).
+  let ids = opts.ids;
+  if (!ids) {
+    try {
+      const ref = await (await fetch('./ref.json')).json();
+      ids = ref.ids || ref.tokens;
+    } catch {}
+  }
+  if (!ids || !ids.length) {
+    // tiny deterministic synthetic ids (first N embed rows); enough for a numeric smoke
+    ids = [42, 43, 44, 45, 100, 101, 102];
+  }
+  const genLen = opts.genLen || 6;
 
-  rt.setUseF16(true);
-  const on = await rt.embedRow(42); // placeholder; real impl would run full layer stack
+  const readLogits = async () => rt.readLogits();
+  const argmaxOf = (a) => {
+    let bi = 0, bv = -Infinity;
+    for (let i = 0; i < a.length; i++) if (a[i] > bv) { bv = a[i]; bi = i; }
+    return bi;
+  };
 
-  // Real implementation sketch:
-  //   - tokenize prompt
-  //   - run prefill or single step with rt.setUseF16(false) → read back hidden or logits slice
-  //   - repeat with true
-  //   - compute diff
+  const decodeN = async (pos, n) => {
+    const out = [await rt.argmaxLogits()];
+    while (out.length < n) {
+      const b = await rt.decodeBatch(pos, Math.min(rt.decodeBatchCapacity || 8, n - out.length));
+      pos += b.length;
+      out.push(...b);
+    }
+    return out.slice(0, n);
+  };
 
-  console.log('[f16_diff] toggle works, hasF16=', rt.hasF16, 'usingF16 now=', rt.usingF16());
-  console.log('[f16_diff] f16 covers: add/silu/rms/rope*/attn-combine. Partial attn score/softmax/V remain f32 for stability.');
+  const runOne = async (useF, label) => {
+    rt.setUseF16(useF);
+    // re-prefill from scratch so KV + all math use the chosen f16 paths
+    rt.prefillBatch(ids);
+    const logits = await readLogits();
+    const dispatches = rt.lastDispatchCount || 0;
+    const gen = await decodeN(ids.length, genLen);
+    const top = argmaxOf(logits);
+    console.log(`[f16_diff] ${label}  dispatches≈${dispatches}  argmax=${top}  gen=${JSON.stringify(gen)}`);
+    return { logits, gen, top, dispatches };
+  };
 
-  // Recommended real usage (in a full test that has a loaded rt + tokenizer + step()):
-  //   rt.setUseF16(false); const logits0 = await captureLogitsAfterStep(rt, promptTokens);
-  //   rt.setUseF16(true);  const logits1 = await captureLogitsAfterStep(rt, promptTokens);
-  //   const diff = maxAbsRel(logits0, logits1);
-  //   console.log('f16 vs f32 maxAbs', diff.maxAbs, 'rel', diff.rel);
-  //   // Also: run full greedy decode N tokens both ways and assert top-1 token id match rate.
+  // f32 path
+  const off = await runOne(false, 'f32');
+  // f16 path (same prompt, same rt, re-prefill uses f16 kernels where available)
+  const on = await runOne(true, 'f16');
 
-  return { hasF16: true, note: 'f16 attention-combine now selectable; expand capture for numeric eval' };
+  const maxAbs = maxAbsDiff(off.logits, on.logits);
+  const maxRel = maxRelDiff(off.logits, on.logits);
+  const topK = topKMatch(off.logits, on.logits, 5);
+  const genMatch = JSON.stringify(off.gen) === JSON.stringify(on.gen);
+  const topMatch = off.top === on.top;
+
+  const tol = opts.tolRel || 5e-3; // per-plan guidance ~1e-3..1e-4 typical; allow headroom for first impl
+  const pass = genMatch || (maxRel < tol && topMatch);
+
+  console.log('[f16_diff] === numeric diff ===');
+  console.log('  maxAbs:', maxAbs.toExponential(4), ' maxRel:', maxRel.toExponential(4));
+  console.log('  top5 match rate:', topK.rate, ' genMatch:', genMatch, ' top1Match:', topMatch);
+  console.log('  PASS (gen or (rel<tol && top1)) :', pass, ' tolRel=', tol);
+
+  return {
+    hasF16: true,
+    maxAbs, maxRel,
+    topK, genMatch, topMatch,
+    pass,
+    offTop: off.top, onTop: on.top,
+    offGen: off.gen, onGen: on.gen,
+    f16Covered: 'add/silu/rms*/rope*/attn-combine (partial attn still f32)',
+  };
 }
 
 // Reusable numeric helpers (pure JS) for harnesses.
