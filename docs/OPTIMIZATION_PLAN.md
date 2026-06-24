@@ -266,6 +266,17 @@ Continuing linearly into deeper f16 kernels + accuracy harness + Phase 4 overrid
 
 Next linear: more f16 kernels (RoPE math, attention score/softmax/V, GEMV4 accum if safe), f16-vs-f32 harness, Phase 4 overrides.
 
+**Latest linear step (continue):**
+- Phase 3 expanded: ROPE_F16, ROPE_QK_F16, ROPE_T_F16 added (f16 math for rotation: cast cos/sin/x to f16 for mul/add, write f32 back).
+- Runtime: ropeF16 / ropeQKF16 / ropeTF16 pipelines created when shader-f16 present.
+- rope(), ropeQK(), ropeT() now select f16 variant when usingF16().
+- Log message updated: "f16 compute enabled (add/silu/rms/rope paths)".
+- Phase 3 coverage now includes every RoPE call (decode + prefill paths).
+- Still 0 var<uniform> in kernels; f32 storage maintained for engine compatibility.
+- Linear progress: f16 now covers the frequent activation math kernels (norm, residual, silu, rope).
+
+Continuing to accuracy harness stub + Phase 4 (more overrides + workgroup tuning) on next step.
+
 ---
 
 *This document is the single source of truth for the optimization effort.*

@@ -16,7 +16,10 @@ import {
   RMSNORM,
   RMSNORM_F16,
   ROPE,
+  ROPE_F16,
   ROPE_QK,
+  ROPE_QK_F16,
+  ROPE_T_F16,
   ATTN_PARTIAL,
   ATTN_COMBINE,
   ADD,
@@ -199,7 +202,11 @@ export class QwenWGPU {
       rms: this._pipe(RMSNORM, 'rms'),
       rmsF16: hasF16 ? this._pipe(RMSNORM_F16, 'rmsF16') : null,
       rope: this._pipe(ROPE, 'rope'),
+      ropeF16: hasF16 ? this._pipe(ROPE_F16, 'ropeF16') : null,
       ropeQK: this._pipe(ROPE_QK, 'ropeQK'),
+      ropeQKF16: hasF16 ? this._pipe(ROPE_QK_F16, 'ropeQKF16') : null,
+      ropeT: this._pipe(ROPE_T, 'ropeT'),
+      ropeTF16: hasF16 ? this._pipe(ROPE_T_F16, 'ropeTF16') : null,
       attnP: this._pipe(ATTN_PARTIAL, 'attnP'),
       attnC: this._pipe(ATTN_COMBINE, 'attnC'),
       add: this._pipe(ADD, 'add', { WG: this.workgroupSize || 256 }),
@@ -217,7 +224,6 @@ export class QwenWGPU {
       gemm4: this._pipe(GEMM4, 'gemm4'),
       gemm4AddT: this._pipe(GEMM4_ADD_T, 'gemm4AddT'),
       rmsT: this._pipe(RMSNORM_T, 'rmsT'),
-      ropeT: this._pipe(ROPE_T, 'ropeT'),
       embedT: this._pipe(EMBED_T, 'embedT'),
       attnPrefill: this._pipe(ATTN_PREFILL, 'attnPrefill'),
       attnPrefillBlock: this._pipe(ATTN_PREFILL_BLOCK, 'attnPrefillBlock'),
@@ -239,7 +245,7 @@ export class QwenWGPU {
 
     if (hasF16) {
       this.setUseF16(true);
-      onProgress('f16 compute enabled (add/silu/rms paths)', 0);
+      onProgress('f16 compute enabled (add/silu/rms/rope paths)', 0);
     }
 
     onProgress('streaming + quantizing weights', 0);
@@ -1206,27 +1212,31 @@ export class QwenWGPU {
     this._dispatch(enc, pipe, this._bgCached(pipe, [xBuf, gBuf, yBuf], key), 1, 1, useF16 ? 'rmsF16' : 'rms', imm);
   }
   rope(enc, xBuf, pos, nHeads) {
+    const useF16 = this.usingF16() && this.pipes.ropeF16;
+    const pipe = useF16 ? this.pipes.ropeF16 : this.pipes.rope;
     this._dispatch(
       enc,
-      this.pipes.rope,
-      this._bg(this.pipes.rope, [
+      pipe,
+      this._bg(pipe, [
         xBuf,
         this.ropeCos,
         this.ropeSin,
       ]),
       Math.ceil((nHeads * (this.cfg.headDim / 2)) / 256),
       1,
-      'rope',
+      useF16 ? 'ropeF16' : 'rope',
       new Uint32Array([nHeads, this.cfg.headDim, pos])
     );
   }
   ropeQK(enc, qBuf, kBuf, pos) {
     const c = this.cfg;
     const pairs = (c.numHeads + c.numKVHeads) * (c.headDim / 2);
+    const useF16 = this.usingF16() && this.pipes.ropeQKF16;
+    const pipe = useF16 ? this.pipes.ropeQKF16 : this.pipes.ropeQK;
     this._dispatch(
       enc,
-      this.pipes.ropeQK,
-      this._bg(this.pipes.ropeQK, [
+      pipe,
+      this._bg(pipe, [
         qBuf,
         kBuf,
         this.ropeCos,
@@ -1234,7 +1244,7 @@ export class QwenWGPU {
       ]),
       Math.ceil(pairs / 256),
       1,
-      'ropeQK',
+      useF16 ? 'ropeQKF16' : 'ropeQK',
       new Uint32Array([c.numHeads, c.numKVHeads, c.headDim, pos])
     );
   }
@@ -1570,13 +1580,15 @@ export class QwenWGPU {
   ropeT(enc, xBuf, T, nHeads, pos0 = 0) {
     const hd = this.cfg.headDim;
     const imm = new Uint32Array([nHeads, hd, T, pos0]);
+    const useF16 = this.usingF16() && this.pipes.ropeTF16;
+    const pipe = useF16 ? this.pipes.ropeTF16 : this.pipes.ropeT;
     this._dispatch(
       enc,
-      this.pipes.ropeT,
-      this._bg(this.pipes.ropeT, [xBuf, this.ropeCos, this.ropeSin]),
+      pipe,
+      this._bg(pipe, [xBuf, this.ropeCos, this.ropeSin]),
       Math.ceil((T * nHeads * (hd / 2)) / 256),
       1,
-      'ropeT',
+      useF16 ? 'ropeTF16' : 'ropeT',
       imm,
     );
   }

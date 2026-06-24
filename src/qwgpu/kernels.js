@@ -148,12 +148,13 @@ fn main(@builtin(local_invocation_id) lid: vec3<u32>) {
 export const RMSNORM_F16 = `
 requires immediate_address_space;
 enable f16;
+override WG: u32 = 256u;
 @group(0) @binding(0) var<storage,read> x: array<f32>;
 @group(0) @binding(1) var<storage,read> g: array<f32>;
 @group(0) @binding(2) var<storage,read_write> y: array<f32>;
 var<immediate> m: vec2<f32>;   // K, eps
 var<workgroup> part: array<f16,256>;
-@compute @workgroup_size(256)
+@compute @workgroup_size(WG)
 fn main(@builtin(local_invocation_id) lid: vec3<u32>) {
   let tid = lid.x; let K = u32(m.x);
   var s = 0.0h;
@@ -185,6 +186,26 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   x[hi] = xh*c + xl*s;
 }`;
 
+// RoPE f16 variant (f16 math on f32 storage).
+export const ROPE_F16 = `
+requires immediate_address_space;
+enable f16;
+@group(0) @binding(0) var<storage,read_write> x: array<f32>;
+@group(0) @binding(1) var<storage,read> cosT: array<f32>;
+@group(0) @binding(2) var<storage,read> sinT: array<f32>;
+var<immediate> m: vec3<u32>;             // nHeads, headDim, pos
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let g = gid.x; let H = m.x; let D = m.y; let pos = m.z; let half = D/2u;
+  if (g >= H*half) { return; }
+  let h = g / half; let j = g % half;
+  let lo = h*D + j; let hi = lo + half; let off = pos*D + j;
+  let c = f16(cosT[off]); let s = f16(sinT[off]);
+  let xl = f16(x[lo]); let xh = f16(x[hi]);
+  x[lo] = f32( xl*c - xh*s );
+  x[hi] = f32( xh*c + xl*s );
+}`;
+
 // Combined decode RoPE for Q and K in one dispatch. Qwen layout is
 // [head][headDim] with the low/high half rotation at the absolute token position.
 export const ROPE_QK = `
@@ -211,6 +232,35 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   } else {
     let xl = q[lo]; let xh = q[hi];
     q[lo] = xl*c - xh*s; q[hi] = xh*c + xl*s;
+  }
+}`;
+
+// ROPE_QK f16 variant.
+export const ROPE_QK_F16 = `
+requires immediate_address_space;
+enable f16;
+@group(0) @binding(0) var<storage,read_write> q: array<f32>;
+@group(0) @binding(1) var<storage,read_write> k: array<f32>;
+@group(0) @binding(2) var<storage,read> cosT: array<f32>;
+@group(0) @binding(3) var<storage,read> sinT: array<f32>;
+var<immediate> m: vec4<u32>;             // qHeads, kvHeads, headDim, pos
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let g = gid.x; let qH = m.x; let kH = m.y; let D = m.z; let pos = m.w; let half = D/2u;
+  let qPairs = qH * half; let kPairs = kH * half; let total = qPairs + kPairs;
+  if (g >= total) { return; }
+  let isK = g >= qPairs;
+  var r = g;
+  if (isK) { r = g - qPairs; }
+  let h = r / half; let j = r % half;
+  let lo = h*D + j; let hi = lo + half; let off = pos*D + j;
+  let c = f16(cosT[off]); let s = f16(sinT[off]);
+  if (isK) {
+    let xl = f16(k[lo]); let xh = f16(k[hi]);
+    k[lo] = f32( xl*c - xh*s ); k[hi] = f32( xh*c + xl*s );
+  } else {
+    let xl = f16(q[lo]); let xh = f16(q[hi]);
+    q[lo] = f32( xl*c - xh*s ); q[hi] = f32( xh*c + xl*s );
   }
 }`;
 
@@ -408,12 +458,13 @@ fn main(@builtin(global_invocation_index) gid: u32, @builtin(num_workgroups) nwg
 export const SILUMUL_F16 = `
 requires immediate_address_space;
 enable f16;
+override WG: u32 = 256u;
 @group(0) @binding(0) var<storage,read_write> gate: array<f32>;
 @group(0) @binding(1) var<storage,read> up: array<f32>;
 var<immediate> n: u32;
-@compute @workgroup_size(256)
+@compute @workgroup_size(WG)
 fn main(@builtin(global_invocation_id) g: vec3<u32>, @builtin(num_workgroups) nwg: vec3<u32>) {
-  let stride = nwg.x * 256u;
+  let stride = nwg.x * WG;
   for (var i = g.x; i < n; i = i + stride) { let v = f16(gate[i]); gate[i] = f32( (v/(1.0h+exp(-v))) * f16(up[i]) ); }
 }`;
 
@@ -496,6 +547,24 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let rb = row*H*D; let lo = rb + h*D + j; let hi = lo + half; let off = (pos0+row)*D + j;
   let c = cosT[off]; let s = sinT[off]; let xl = x[lo]; let xh = x[hi];
   x[lo] = xl*c - xh*s; x[hi] = xh*c + xl*s;
+}`;
+
+// ROPE_T f16 variant.
+export const ROPE_T_F16 = `
+requires immediate_address_space;
+enable f16;
+@group(0) @binding(0) var<storage,read_write> x: array<f32>;
+@group(0) @binding(1) var<storage,read> cosT: array<f32>;
+@group(0) @binding(2) var<storage,read> sinT: array<f32>;
+var<immediate> m: vec4<u32>;   // nHeads, headDim, T, pos0
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let g = gid.x; let H = m.x; let D = m.y; let T = m.z; let pos0 = m.w; let half = D/2u;
+  let perRow = H*half; if (g >= T*perRow) { return; }
+  let row = g / perRow; let r = g % perRow; let h = r / half; let j = r % half;
+  let rb = row*H*D; let lo = rb + h*D + j; let hi = lo + half; let off = (pos0+row)*D + j;
+  let c = f16(cosT[off]); let s = f16(sinT[off]); let xl = f16(x[lo]); let xh = f16(x[hi]);
+  x[lo] = f32( xl*c - xh*s ); x[hi] = f32( xh*c + xl*s );
 }`;
 
 // Embed T tokens: out[t][k] = dequant(embed[ids[idOffset+t]])[k].
