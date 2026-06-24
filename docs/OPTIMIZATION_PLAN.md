@@ -326,7 +326,15 @@ Ready for: run the harness on real hardware for numbers; next could be ATTN_PART
 - Build clean. 0 var<uniform> preserved.
 - This delivers the plan item "ATTN_PARTIAL_F16 candidate".
 
-Next linear: run f16 harness on hardware for real deltas (with partial now covered), consider paged f16 partial or prefill attn f16, basic workgroup autotune microbench (Phase 4), more overrides, Phase 5 sampling.
+- Phase 4 basic autotune: added `autotuneWorkgroups()` skeleton.
+  - Tries candidate WGs (default 32/64/128/256) for override-capable kernels.
+  - Uses wall-time + onSubmittedWorkDone micro-dispatches.
+  - Currently exercises 'add' (hot residual); returns per-cand timings + best.
+  - Optional `apply: true` hot-swaps the production pipe.
+  - Exposed for manual call or future load-time use in build().
+- Plan records the WG autotune entry point.
+
+Next linear: run f16 harness on hardware for real deltas (partial attn now covered too), paged or prefill f16 attn, flesh out autotune (more kernels, timestamp queries, persist best-per-gpu), more overrides, Phase 5 GPU sampling.
 
 ---
 

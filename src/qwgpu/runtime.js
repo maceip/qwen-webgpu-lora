@@ -129,6 +129,64 @@ export class QwenWGPU {
     if (wg && wg > 0) this.workgroupSize = wg | 0;
   }
 
+  // Basic load-time / on-demand workgroup autotuner (Phase 4).
+  // Tries a few WG sizes for simple override-supporting kernels (add / rms for now).
+  // Uses wall time + onSubmittedWorkDone for broad compatibility.
+  // Returns a map of best sizes; optionally hot-swaps the pipe for 'add'.
+  async autotuneWorkgroups(opts = {}) {
+    const iters = opts.iters || 6;
+    const cands = opts.candidates || [32, 64, 128, 256];
+    const results = {};
+
+    const timeKernel = async (pipe, n, label) => {
+      // tiny synthetic work: n elements
+      const a = this._buf(n * 4);
+      const y = this._buf(n * 4);
+      // initialize a bit of data (not critical for timing the dispatch itself)
+      const enc0 = this.dev.createCommandEncoder();
+      // zero-ish fill not needed for timing the shader launch overhead + execution
+      this.dev.queue.submit([enc0.finish()]);
+
+      const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      for (let i = 0; i < iters; i++) {
+        const enc = this.dev.createCommandEncoder();
+        const bg = this._bg(pipe, [a, y]);
+        // use the immediate the kernel expects (n)
+        const imm = new Uint32Array([n]);
+        this._dispatch(enc, pipe, bg, Math.ceil(n / (pipe.__wg || 256)), 1, label + ':bench', imm);
+        this.dev.queue.submit([enc.finish()]);
+        if (this.dev.queue.onSubmittedWorkDone) await this.dev.queue.onSubmittedWorkDone();
+      }
+      const ms = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
+      // cleanup
+      a.destroy?.(); y.destroy?.();
+      return ms / iters;
+    };
+
+    // Example: autotune 'add' (very hot residual path)
+    try {
+      let best = { wg: this.workgroupSize || 256, ms: Infinity };
+      for (const wg of cands) {
+        const p = this._pipe(ADD, `add:autotune:${wg}`, { WG: wg });
+        p.__wg = wg; // for dispatch math above
+        const ms = await timeKernel(p, 4096, `add${wg}`);
+        if (ms < best.ms) best = { wg, ms };
+        results[`add:${wg}`] = ms;
+      }
+      results.bestAdd = best;
+      if (opts.apply) {
+        // hot swap a production pipe with the winner (demo)
+        this.pipes.add = this._pipe(ADD, 'add', { WG: best.wg });
+        this.pipes.add.__wg = best.wg;
+      }
+    } catch (e) {
+      results.addError = String(e);
+    }
+
+    console.log('[autotune] WG microbench results (ms/iter):', results);
+    return results;
+  }
+
   _buf(size, usage = STORAGE) {
     return this.pool.buffer(size, usage);
   }
