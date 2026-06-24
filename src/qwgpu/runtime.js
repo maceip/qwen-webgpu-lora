@@ -23,6 +23,7 @@ import {
   RMSNORM_T_F16,
   ATTN_PARTIAL,
   ATTN_COMBINE,
+  ATTN_COMBINE_F16,
   ADD,
   ADD_F16,
   SILUMUL,
@@ -217,7 +218,8 @@ export class QwenWGPU {
       ropeT: this._pipe(ROPE_T, 'ropeT'),
       ropeTF16: hasF16 ? this._pipe(ROPE_T_F16, 'ropeTF16') : null,
       attnP: this._pipe(ATTN_PARTIAL, 'attnP'),
-      attnC: this._pipe(ATTN_COMBINE, 'attnC'),
+      attnC: this._pipe(ATTN_COMBINE, 'attnC', { WG: 128 }),
+      attnCF16: hasF16 ? this._pipe(ATTN_COMBINE_F16, 'attnCF16', { WG: 128 }) : null,
       add: this._pipe(ADD, 'add', { WG: this.workgroupSize || 256 }),
       silu: this._pipe(SILUMUL, 'silu', { WG: this.workgroupSize || 256 }),
       addF16: hasF16 ? this._pipe(ADD_F16, 'addF16', { WG: this.workgroupSize || 256 }) : null,
@@ -255,7 +257,7 @@ export class QwenWGPU {
 
     if (hasF16) {
       this.setUseF16(true);
-      onProgress('f16 compute enabled (add/silu/rms/rope paths)', 0);
+      onProgress('f16 compute enabled (add/silu/rms/rope/attn-combine paths)', 0);
     }
 
     onProgress('streaming + quantizing weights', 0);
@@ -1075,14 +1077,16 @@ export class QwenWGPU {
     const immP = new Uint32Array([c.numHeads, c.numKVHeads, ctx, c.headDim]);
     const immP2 = new Uint32Array([nsplit, this.CHUNK, 0, this.pam.maxBlocksPerSeq]);
     this._dispatch(enc, this.pipes.attnPartialPaged, bgP, c.numHeads, nsplit, 'attnP_paged', [immP, immP2]);
-    const bgC = this._bg(this.pipes.attnC, [
+    const useF16C = this.usingF16() && this.pipes.attnCF16;
+    const pipeC = useF16C ? this.pipes.attnCF16 : this.pipes.attnC;
+    const bgC = this._bg(pipeC, [
       S.pm,
       S.pz,
       S.po,
       oBuf,
     ]);
     const immC = new Uint32Array([c.numHeads, c.headDim, nsplit, 0]);
-    this._dispatch(enc, this.pipes.attnC, bgC, c.numHeads, 1, 'attnC', immC);
+    this._dispatch(enc, pipeC, bgC, c.numHeads, 1, useF16C ? 'attnCF16' : 'attnC', immC);
   }
 
   attnPrefillPaged(enc, qBuf, kc, vc, oBuf, T, qStart = 0, ctx = T) {
@@ -1274,14 +1278,16 @@ export class QwenWGPU {
     const immP = new Uint32Array([c.numHeads, c.numKVHeads, ctx, c.headDim, nsplit, this.CHUNK]);
     this._dispatch(enc, this.pipes.attnP, bgP, c.numHeads, nsplit, 'attnP', immP);
     // pass 2: combine splits per head → o
-    const bgC = this._bg(this.pipes.attnC, [
+    const useF16C = this.usingF16() && this.pipes.attnCF16;
+    const pipeC = useF16C ? this.pipes.attnCF16 : this.pipes.attnC;
+    const bgC = this._bg(pipeC, [
       S.pm,
       S.pz,
       S.po,
       oBuf,
     ]);
     const immC = new Uint32Array([c.numHeads, c.headDim, nsplit, 0]);
-    this._dispatch(enc, this.pipes.attnC, bgC, c.numHeads, 1, 'attnC', immC);
+    this._dispatch(enc, pipeC, bgC, c.numHeads, 1, useF16C ? 'attnCF16' : 'attnC', immC);
   }
 
   // Decode one token at absolute position `pos`. Writes logits to s.logits. Returns nothing.

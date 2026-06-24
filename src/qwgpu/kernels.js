@@ -314,21 +314,45 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
 // Combine split partials per head via online softmax → final o[nHeads*hd].
 export const ATTN_COMBINE = `
 requires immediate_address_space;
+override WG: u32 = 128u;
 @group(0) @binding(0) var<storage,read> pm: array<f32>;
 @group(0) @binding(1) var<storage,read> pz: array<f32>;
 @group(0) @binding(2) var<storage,read> po: array<f32>;
 @group(0) @binding(3) var<storage,read_write> o: array<f32>;
 var<immediate> m: vec4<u32>;   // nHeads, hd, nsplit, _
-@compute @workgroup_size(128)
+@compute @workgroup_size(WG)
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
   let h = wid.x; let tid = lid.x; let hd = m.y; let nsplit = m.z; let base = h*nsplit;
   var M = -1e30; for (var s = 0u; s < nsplit; s = s + 1u) { M = max(M, pm[base+s]); }
   var Z = 0.0; for (var s = 0u; s < nsplit; s = s + 1u) { Z = Z + pz[base+s]*exp(pm[base+s]-M); }
   let invZ = 1.0 / Z;
-  for (var d = tid; d < hd; d = d + 128u) {
+  for (var d = tid; d < hd; d = d + WG) {
     var acc = 0.0;
     for (var s = 0u; s < nsplit; s = s + 1u) { acc = acc + exp(pm[base+s]-M)*po[(base+s)*hd + d]; }
     o[h*hd + d] = acc * invZ;
+  }
+}`;
+
+// f16 math variant of the combine (reads f32 partials, does exp/weighted/normalize in f16).
+export const ATTN_COMBINE_F16 = `
+requires immediate_address_space;
+enable f16;
+override WG: u32 = 128u;
+@group(0) @binding(0) var<storage,read> pm: array<f32>;
+@group(0) @binding(1) var<storage,read> pz: array<f32>;
+@group(0) @binding(2) var<storage,read> po: array<f32>;
+@group(0) @binding(3) var<storage,read_write> o: array<f32>;
+var<immediate> m: vec4<u32>;   // nHeads, hd, nsplit, _
+@compute @workgroup_size(WG)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
+  let h = wid.x; let tid = lid.x; let hd = m.y; let nsplit = m.z; let base = h*nsplit;
+  var M = -1e4h; for (var s = 0u; s < nsplit; s = s + 1u) { M = max(M, f16(pm[base+s])); }
+  var Z = 0.0h; for (var s = 0u; s < nsplit; s = s + 1u) { Z = Z + f16(pz[base+s]) * exp(f16(pm[base+s]) - M); }
+  let invZ = 1.0h / Z;
+  for (var d = tid; d < hd; d = d + WG) {
+    var acc = 0.0h;
+    for (var s = 0u; s < nsplit; s = s + 1u) { acc = acc + exp(f16(pm[base+s]) - M) * f16(po[(base+s)*hd + d]); }
+    o[h*hd + d] = f32(acc * invZ);
   }
 }`;
 

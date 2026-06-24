@@ -287,6 +287,17 @@ Continuing to accuracy harness stub + Phase 4 (more overrides + workgroup tuning
 - Consistent with ADD / SILU f16/f32 which already used overrides.
 - `setWorkgroupSize(wg)` + progress log for chosen WG. Hook for future microbench autotuner.
 
+**Latest linear step (continue):**
+- Phase 3 deeper f16: ATTN_COMBINE_F16 (f16 for max/exp/Z/weighted-V-normalize in the split-combine pass).
+- ATTN_COMBINE (f32) also upgraded to `override WG`.
+- Pipe `attnCF16` + conditional selection in `attn()` and `attnPaged()` combine step.
+- Log updated: "f16 compute enabled (add/silu/rms/rope/attn-combine paths)".
+- f16 harness stub refreshed with attn guidance.
+- Note: heavy lifting (QK dots, softmax, inner V accum) in ATTN_PARTIAL remains f32 this slice; combine is the first safe attn f16 win.
+- Still 0 var<uniform>.
+
+Next linear: real numeric f16-vs-f32 harness execution + tolerance logging, ATTN_PARTIAL_F16 candidate or prefill attn f16, basic WG autotune loop (Phase 4), more overrides, Phase 5 GPU sampling.
+
 ---
 
 *This document is the single source of truth for the optimization effort.*

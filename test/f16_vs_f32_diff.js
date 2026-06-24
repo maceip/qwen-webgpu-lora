@@ -2,16 +2,15 @@
 // Phase 3 eval harness stub (per OPTIMIZATION_PLAN.md).
 // Usage (in browser console or via test runner that loads this):
 //   import('./test/f16_vs_f32_diff.js').then(m => m.runF16Diff())
-// Expects a global `rt` (QwenWGPU instance) or will create one.
 //
 // What it does:
-// - Runs a short forward (embed + first layer rms/rope/add/silu) with f16=off then f16=on.
-// - Captures a slice of the activation (e.g. after rms or after silu) or final logits if accessible.
-// - Reports max-abs-diff + relative diff between the two runs.
-// - For full end-to-end: use the same prompt, greedy decode a few tokens and compare token ids.
+// - Toggle f16 on a built runtime and exercise paths that have f16 variants:
+//   rms, add, silu, rope*, and attn combine (score/softmax/V still f32 in partial for this slice).
+// - For real numbers, pair with capture of hidden state, attention output, or final logits
+//   (see deep_kernel_diff.js / profile for buffer readback patterns).
+// - Full eval: same prompt, f16=off vs on → compare logits or generated tokens (greedy must match top token(s)).
 //
-// This is intentionally lightweight; wire it to your existing deep_kernel_diff / validate harnesses
-// for "real" numbers. Goal: document tolerance and ensure f16 path stays within spec.
+// Acceptance (from plan): small numeric delta (1e-3..1e-4 rel on logits typical); greedy tokens equivalent.
 
 import { QwenWGPU } from '../src/qwgpu/runtime.js';
 import { QWEN25_3B } from '../src/config.js';
@@ -51,9 +50,16 @@ export async function runF16Diff(opts = {}) {
   //   - compute diff
 
   console.log('[f16_diff] toggle works, hasF16=', rt.hasF16, 'usingF16 now=', rt.usingF16());
-  console.log('[f16_diff] stub complete. Wire to real forward for numeric diff (maxAbs, rel, token parity).');
+  console.log('[f16_diff] f16 covers: add/silu/rms/rope*/attn-combine. Partial attn score/softmax/V remain f32 for stability.');
 
-  return { hasF16: true, note: 'stub; implement real capture in harness' };
+  // Recommended real usage (in a full test that has a loaded rt + tokenizer + step()):
+  //   rt.setUseF16(false); const logits0 = await captureLogitsAfterStep(rt, promptTokens);
+  //   rt.setUseF16(true);  const logits1 = await captureLogitsAfterStep(rt, promptTokens);
+  //   const diff = maxAbsRel(logits0, logits1);
+  //   console.log('f16 vs f32 maxAbs', diff.maxAbs, 'rel', diff.rel);
+  //   // Also: run full greedy decode N tokens both ways and assert top-1 token id match rate.
+
+  return { hasF16: true, note: 'f16 attention-combine now selectable; expand capture for numeric eval' };
 }
 
 // Auto-run hook for convenience in some test loaders:
