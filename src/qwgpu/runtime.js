@@ -100,6 +100,13 @@ export class QwenWGPU {
     return { ...this.features };
   }
 
+  // Phase 3 (f16): when shader-f16 is available we can switch hot kernels to f16
+  // storage/compute for bandwidth wins. Stub for now; real kernel variants + selection
+  // will be added. Evaluation: compare f16 vs f32 logits within tolerance + bench speedup.
+  hasF16Compute() {
+    return !!this.dev.features.has('shader-f16');
+  }
+
   _buf(size, usage = STORAGE) {
     return this.pool.buffer(size, usage);
   }
@@ -1385,6 +1392,7 @@ export class QwenWGPU {
     );
     enc.copyBufferToBuffer(this.s.amax, 0, this.argmaxRead, 0, 4);
     this.dev.queue.submit([enc.finish()]);
+    if (this.dev.queue.onSubmittedWorkDone) await this.dev.queue.onSubmittedWorkDone();
     try {
       await this.argmaxRead.mapAsync(GPUMapMode.READ);
       const id = new Uint32Array(this.argmaxRead.getMappedRange())[0];

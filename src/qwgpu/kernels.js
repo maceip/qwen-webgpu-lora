@@ -352,12 +352,13 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
 export const ADD = `
 requires immediate_address_space;
 requires linear_indexing;
+override WG: u32 = 256u;
 @group(0) @binding(0) var<storage,read> a: array<f32>;
 @group(0) @binding(1) var<storage,read_write> y: array<f32>;
 var<immediate> n: u32;
-@compute @workgroup_size(256)
+@compute @workgroup_size(WG)
 fn main(@builtin(global_invocation_index) gid: u32, @builtin(num_workgroups) nwg: vec3<u32>) {
-  let stride = nwg.x * 256u;
+  let stride = nwg.x * WG;
   for (var i = gid; i < n; i = i + stride) { y[i] = y[i] + a[i]; }
 }`;
 
