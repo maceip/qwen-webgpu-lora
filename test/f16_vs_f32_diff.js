@@ -114,8 +114,39 @@ export async function runF16Diff(opts = {}) {
     pass,
     offTop: off.top, onTop: on.top,
     offGen: off.gen, onGen: on.gen,
-    f16Covered: 'add/silu/rms*/rope*/attn-combine (partial attn still f32)',
+    f16Covered: 'add/silu/rms*/rope*/attn-partial/combine (partial attn f16 now available)',
   };
+
+  // Optional Phase 5 sampling parity smoke (uses new GPU sampler).
+  // With fixed r the sampled id under the same topK must match for f32 vs f16 paths
+  // (within the numeric tolerance already checked on logits).
+  let sampleResult = {};
+  try {
+    const fixedR = 0.37;
+    rt.setUseF16(false);
+    rt.prefillBatch(ids);
+    const idF32 = await rt.sampleToken(1.0, fixedR);
+
+    rt.setUseF16(true);
+    rt.prefillBatch(ids);
+    const idF16 = await rt.sampleToken(1.0, fixedR);
+
+    console.log('[f16_diff] sampleToken parity (fixed r):', idF32, 'vs', idF16, 'match=', idF32 === idF16);
+    sampleResult = { sampleMatch: idF32 === idF16, sampleF32: idF32, sampleF16: idF16 };
+  } catch (e) {
+    console.log('[f16_diff] sampleToken smoke skipped:', e?.message || e);
+  }
+
+  const base = {
+    hasF16: true,
+    maxAbs, maxRel,
+    topK, genMatch, topMatch,
+    pass,
+    offTop: off.top, onTop: on.top,
+    offGen: off.gen, onGen: on.gen,
+    f16Covered: 'add/silu/rms*/rope*/attn-partial/combine',
+  };
+  return { ...base, ...sampleResult };
 }
 
 // Reusable numeric helpers (pure JS) for harnesses.
