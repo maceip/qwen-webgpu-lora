@@ -121,6 +121,12 @@ export class QwenWGPU {
   }
   usingF16() { return !!this._useF16; }
 
+  // Phase 4: allow caller / autotuner to override workgroup size after build if desired.
+  // Note: affects *future* pipes / re-pipes; existing pipes keep their specialization.
+  setWorkgroupSize(wg) {
+    if (wg && wg > 0) this.workgroupSize = wg | 0;
+  }
+
   _buf(size, usage = STORAGE) {
     return this.pool.buffer(size, usage);
   }
@@ -168,6 +174,8 @@ export class QwenWGPU {
     const isAppleSilicon = this.dev.limits.minStorageBufferOffsetAlignment === 4;
     const isIntelArc = this.dev.limits.minStorageBufferOffsetAlignment === 256;
     this.workgroupSize = isAppleSilicon || isIntelArc ? 32 : 64;
+    // Phase 4: cheap static heuristic. Real autotune (bench a few micro dispatches) can override later.
+    onProgress && onProgress(`workgroup size chosen: ${this.workgroupSize} (apple/intel bias toward 32)`, 0);
 
     let hasDP4a = false;
     if (

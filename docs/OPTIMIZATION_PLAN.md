@@ -285,6 +285,7 @@ Continuing to accuracy harness stub + Phase 4 (more overrides + workgroup tuning
 **Phase 4 start (linear hygiene):**
 - RMSNORM / RMSNORM_T / *_F16 now declare `override WG` (specialization constant) and pipes pass `{ WG: ... }` at creation time. This prepares for per-hw workgroup autotuning without codegen at runtime.
 - Consistent with ADD / SILU f16/f32 which already used overrides.
+- `setWorkgroupSize(wg)` + progress log for chosen WG. Hook for future microbench autotuner.
 
 ---
 
