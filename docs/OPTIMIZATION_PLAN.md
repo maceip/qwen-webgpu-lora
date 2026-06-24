@@ -295,8 +295,9 @@ Continuing to accuracy harness stub + Phase 4 (more overrides + workgroup tuning
 - f16 harness stub refreshed with attn guidance.
 - Note: heavy lifting (QK dots, softmax, inner V accum) in ATTN_PARTIAL remains f32 this slice; combine is the first safe attn f16 win.
 - Still 0 var<uniform>.
+- f16_vs_f32_diff.js now ships concrete helpers: maxAbsDiff, maxRelDiff, topKMatch (plus window export) so browser tests can compute tolerance + top-k parity immediately after capture.
 
-Next linear: real numeric f16-vs-f32 harness execution + tolerance logging, ATTN_PARTIAL_F16 candidate or prefill attn f16, basic WG autotune loop (Phase 4), more overrides, Phase 5 GPU sampling.
+Next linear: real numeric f16-vs-f32 harness execution + tolerance logging (using the helpers), ATTN_PARTIAL_F16 candidate or prefill attn f16, basic WG autotune loop (Phase 4), more overrides, Phase 5 GPU sampling.
 
 ---
 
