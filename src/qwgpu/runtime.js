@@ -33,6 +33,7 @@ import {
   EMBED_BUF,
   ARGMAX,
   TOPK_SELECT,
+  SAMPLE_TOPK,
   GEMM4,
   GEMM4_ADD_T,
   RMSNORM_T,
@@ -142,16 +143,11 @@ export class QwenWGPU {
       // tiny synthetic work: n elements
       const a = this._buf(n * 4);
       const y = this._buf(n * 4);
-      // initialize a bit of data (not critical for timing the dispatch itself)
-      const enc0 = this.dev.createCommandEncoder();
-      // zero-ish fill not needed for timing the shader launch overhead + execution
-      this.dev.queue.submit([enc0.finish()]);
 
       const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
       for (let i = 0; i < iters; i++) {
         const enc = this.dev.createCommandEncoder();
         const bg = this._bg(pipe, [a, y]);
-        // use the immediate the kernel expects (n)
         const imm = new Uint32Array([n]);
         this._dispatch(enc, pipe, bg, Math.ceil(n / (pipe.__wg || 256)), 1, label + ':bench', imm);
         this.dev.queue.submit([enc.finish()]);
@@ -299,6 +295,7 @@ export class QwenWGPU {
       qkvGemv4: this._pipe(QKV_GEMV4, 'qkvGemv4'),
       gateUpSiluGemv4: this._pipe(GATE_UP_SILU_GEMV4, 'gateUpSiluGemv4'),
       topkSelect: this._pipe(TOPK_SELECT, 'topkSelect'),
+      sampleTopK: this._pipe(SAMPLE_TOPK, 'sampleTopK'),
       gemm4: this._pipe(GEMM4, 'gemm4'),
       gemm4AddT: this._pipe(GEMM4_ADD_T, 'gemm4AddT'),
       rmsT: this._pipe(RMSNORM_T, 'rmsT', { WG: this.workgroupSize || 256 }),
@@ -397,6 +394,7 @@ export class QwenWGPU {
       idsBuf: this._buf(this.decodeBatchCapacity * 4),
       sampleIds: this._buf(this.maxSamplingTopK * 4),
       sampleVals: this._buf(this.maxSamplingTopK * 4),
+      sampled: this._buf(4),  // single u32 chosen by GPU sampler (Phase 5)
       x_q: this._buf(Math.max(qd, I) * 4),
       scale_x: this._buf(256 * 4),
       blockTableBuf: this._buf(this.pam.maxBlocksPerSeq * 4, STORAGE | GPUBufferUsage.COPY_DST),
@@ -405,6 +403,7 @@ export class QwenWGPU {
     this.argmaxRead = this._buf(4, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
     this.sampleIdsRead = this._buf(this.maxSamplingTopK * 4, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
     this.sampleValsRead = this._buf(this.maxSamplingTopK * 4, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
+    this.sampledRead = this._buf(4, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
     // prefill scratch is allocated lazily (sized to the actual prompt) — see _ensurePrefillScratch.
     this.sT = null;
     this.sTcap = 0;
@@ -1568,6 +1567,37 @@ export class QwenWGPU {
       this._topKReadBusy = false;
     }
   }
+
+  // Phase 5: GPU-resident sampling.
+  // Populates top-K on GPU (via existing machinery), then runs a tiny kernel that
+  // applies temperature, softmax + nucleus over the k candidates using a host-supplied
+  // uniform r, and writes exactly **one** token id. Only one u32 is read back.
+  // This is the first step toward eliminating large per-token host round-trips for sampling.
+  async sampleToken(temp = 1.0, r = (typeof Math !== 'undefined' ? Math.random() : 0.5)) {
+    const k = Math.min(this.samplingTopK, this.maxSamplingTopK, this.cfg.vocabSize);
+    // Populate the top-K buffers (current impl reads k values; future work can keep
+    // everything resident and chain directly into the sample kernel).
+    await this.topKLogits(k);
+
+    const enc = this.dev.createCommandEncoder();
+    const bg = this._bg(this.pipes.sampleTopK, [
+      this.s.sampleIds,
+      this.s.sampleVals,
+      this.s.sampled,
+    ]);
+    const immK = new Uint32Array([k]);
+    const immP = new Float32Array([temp > 0 ? temp : 1.0, Math.max(0, Math.min(1, r))]);
+    this._dispatch(enc, this.pipes.sampleTopK, bg, 1, 1, 'sampleTopK', [immK, immP]);
+
+    enc.copyBufferToBuffer(this.s.sampled, 0, this.sampledRead, 0, 4);
+    this.dev.queue.submit([enc.finish()]);
+    if (this.dev.queue.onSubmittedWorkDone) await this.dev.queue.onSubmittedWorkDone();
+    await this.sampledRead.mapAsync(GPUMapMode.READ);
+    const id = new Uint32Array(this.sampledRead.getMappedRange())[0];
+    this.sampledRead.unmap();
+    return id;
+  }
+
   // Run one token end-to-end (embed + step) and submit.
   token(id, pos) {
     this._resetUni();

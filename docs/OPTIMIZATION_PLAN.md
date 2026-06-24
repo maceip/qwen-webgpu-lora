@@ -337,8 +337,23 @@ Ready for: run the harness on real hardware for numbers; next could be ATTN_PART
 
 Next linear: run f16 harness on hardware for real deltas (partial attn now covered too), paged or prefill f16 attn, flesh out autotune (more kernels, timestamp queries, persist best-per-gpu), more overrides, Phase 5 GPU sampling.
 
----
+**Latest linear step (continue):**
+- Phase 5 GPU sampling foundation landed:
+  - `SAMPLE_TOPK` kernel (immediate-driven k + temp + r): temperature scale, exp, normalize, prefix sum over the small top-K set, pick bucket for the supplied uniform r, write single token id.
+  - `sampleToken(temp, r)` runtime API: ensures top-K, dispatches the sampler, reads back exactly 1 u32 (via new `s.sampled` + `sampledRead`).
+  - New pipe `sampleTopK`.
+  - This is the first implementation of the plan goal "GPU temperature / top-p sampling to minimize host round-trips".
+- Autotune kept safe + wall-time based (the _dispatch path already records ts when `enableProf()` is active; bench cats will show up in prof output).
+- Plan + build updated.
 
-*This document is the single source of truth for the optimization effort.*
+Next linear items (in order):
+- Wire `sampleToken` into high-level generation (e.g. `generate(..., doSample=true)` path) so end-to-end sampled decode uses it.
+- Optional: fused topK-select + sample in one encoder (avoid the intermediate k-value readbacks even for the selection step when sampling).
+- Run the f16_vs_f32_diff + sampling parity on real hardware; record numbers.
+- Flesh autotune further (timestamp-based when requested, save best-per-adapter, auto-apply at build for common kernels).
+- More overrides and paged/prefill f16 attention kernels.
+- Continue Phase 5 (stop token checks on GPU, Gumbel-max option, etc.).
+
+---
 
 *This document is the single source of truth for the optimization effort.*

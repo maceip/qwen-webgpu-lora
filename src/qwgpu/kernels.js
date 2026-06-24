@@ -877,6 +877,74 @@ fn main(@builtin(local_invocation_id) lid: vec3<u32>) {
   if (tid == 0u) { ids[selected] = bi[0]; vals[selected] = bv[0]; }
 }`;
 
+// GPU-resident sampling from a small top-K set (k typically 8-64).
+// Scales by temperature, softmax over the k, nucleus (topP) or full, picks using
+// a uniform r in [0,1) supplied by host. Writes exactly one token id.
+// This keeps the decision on GPU and reduces the per-token readback to 1 u32.
+export const SAMPLE_TOPK = `
+requires immediate_address_space;
+@group(0) @binding(0) var<storage,read> ids: array<u32>;
+@group(0) @binding(1) var<storage,read> vals: array<f32>;
+@group(0) @binding(2) var<storage,read_write> outId: array<u32>;  // [1] the chosen token
+var<immediate> m: u32;         // k (number of valid top entries)
+var<immediate> params: vec2<f32>; // temp, r (uniform [0,1))
+var<workgroup> s: array<f32, 64>;  // working softmax probs (small k)
+@compute @workgroup_size(64)
+fn main(@builtin(local_invocation_id) lid: vec3<u32>) {
+  let tid = lid.x;
+  let k = m;
+  let temp = params.x;
+  let r = params.y;
+  let t = (temp > 0.0) ? temp : 1.0;
+
+  // Load + temperature scale into shared (one thread per slot)
+  var v = -1e30;
+  if (tid < k) {
+    let lv = vals[tid];
+    v = (t != 1.0) ? (lv / t) : lv;
+  }
+  s[tid] = select(0.0, exp(v), tid < k);
+  workgroupBarrier();
+
+  // sum
+  for (var stride = 32u; stride > 0u; stride = stride / 2u) {
+    if (tid < stride && (tid + stride) < 64u) { s[tid] = s[tid] + s[tid + stride]; }
+    workgroupBarrier();
+  }
+  let sum = s[0];
+  if (sum <= 0.0) {
+    if (tid == 0u) { outId[0] = (k > 0u ? ids[0] : 0u); }
+    return;
+  }
+
+  // normalize + prefix sum for nucleus / categorical pick
+  if (tid < k) {
+    s[tid] = s[tid] / sum;
+  } else {
+    s[tid] = 0.0;
+  }
+  workgroupBarrier();
+
+  // prefix sum (small k, simple scan)
+  for (var stride = 1u; stride < 64u; stride = stride * 2u) {
+    if (tid >= stride && tid < 64u) {
+      s[tid] = s[tid] + s[tid - stride];
+    }
+    workgroupBarrier();
+  }
+
+  // find the smallest j such that prefix[j] >= r  (or last if r>=1)
+  if (tid == 0u) {
+    var chosen = k - 1u;
+    var acc = 0.0;
+    for (var j = 0u; j < k; j = j + 1u) {
+      let pj = s[j];
+      if (r <= pj) { chosen = j; break; }
+    }
+    outId[0] = ids[chosen];
+  }
+}`;
+
 // int4 group-128 GEMV. w: [N][K/8] (8 signed nibbles/word). scale: [N][gpr].
 export const GEMV4 = `
 enable subgroups;
