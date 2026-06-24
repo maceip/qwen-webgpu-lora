@@ -312,6 +312,52 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
   if (tid == 0u) { pm[h*nsplit + s] = M; pz[h*nsplit + s] = Z; }
 }`;
 
+// f16 math variant of split-K partial attention (decode).
+// QK dots, max, exp, softmax sum, and weighted-V use f16; storage for pm/pz/po remains f32
+// so that combine (f32 or f16) and paged paths stay compatible.
+export const ATTN_PARTIAL_F16 = `
+requires immediate_address_space;
+enable subgroups;
+enable f16;
+override WG: u32 = 128u;
+struct AttnP { nHeads: u32, nKV: u32, ctx: u32, hd: u32, nsplit: u32, chunk: u32 };
+@group(0) @binding(0) var<storage,read> q: array<f32>;
+@group(0) @binding(1) var<storage,read> kc: array<f32>;
+@group(0) @binding(2) var<storage,read> vc: array<f32>;
+@group(0) @binding(3) var<storage,read_write> pm: array<f32>;  // [nHeads*nsplit] per-split max
+@group(0) @binding(4) var<storage,read_write> pz: array<f32>;  // [nHeads*nsplit] per-split sum
+@group(0) @binding(5) var<storage,read_write> po: array<f32>;  // [nHeads*nsplit*hd] unnorm weighted V
+var<immediate> m: AttnP;
+var<workgroup> sc: array<f16,128>;
+var<workgroup> red: array<f16,32>;
+@compute @workgroup_size(WG)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>,
+        @builtin(subgroup_size) sgsz: u32, @builtin(subgroup_invocation_id) sgid: u32) {
+  let h = wid.x; let s = wid.y; let tid = lid.x;
+  let nHeads = m.nHeads; let nKV = m.nKV; let ctx = m.ctx; let hd = m.hd; let nsplit = m.nsplit; let chunk = m.chunk;
+  let kvh = h / (nHeads / nKV);
+  let qbase = h*hd; let stride = nKV*hd; let hoff = kvh*hd; let scale = 1.0h / sqrt(f16(hd));
+  let nsg = (WG + sgsz - 1u) / sgsz;
+  let t0 = s*chunk; var t1 = t0 + chunk; if (t1 > ctx) { t1 = ctx; }
+  let t = t0 + tid; var sv = -1e4h;
+  if (t < t1) { var dot = 0.0h; let kb = t*stride + hoff; for (var d = 0u; d < hd; d = d + 1u) { dot = dot + f16(q[qbase+d])*f16(kc[kb+d]); } sv = dot*scale; }
+  let sgm = subgroupMax(sv); if (sgid == 0u) { red[tid/sgsz] = sgm; }
+  workgroupBarrier();
+  var M = -1e4h; for (var i = 0u; i < nsg; i = i + 1u) { M = max(M, red[i]); }
+  workgroupBarrier();
+  var ev = 0.0h; if (t < t1) { ev = exp(sv - M); } sc[tid] = ev;
+  let sgs = subgroupAdd(ev); if (sgid == 0u) { red[tid/sgsz] = sgs; }
+  workgroupBarrier();
+  var Z = 0.0h; for (var i = 0u; i < nsg; i = i + 1u) { Z = Z + red[i]; }
+  workgroupBarrier();
+  let len = t1 - t0; let pbase = (h*nsplit + s)*hd;
+  for (var d = tid; d < hd; d = d + WG) {
+    var acc = 0.0h; for (var tt = 0u; tt < len; tt = tt + 1u) { acc = acc + sc[tt] * f16(vc[(t0+tt)*stride + hoff + d]); }
+    po[pbase + d] = f32(acc);
+  }
+  if (tid == 0u) { pm[h*nsplit + s] = f32(M); pz[h*nsplit + s] = f32(Z); }
+}`;
+
 // Combine split partials per head via online softmax → final o[nHeads*hd].
 export const ATTN_COMBINE = `
 requires immediate_address_space;

@@ -22,6 +22,7 @@ import {
   ROPE_T_F16,
   RMSNORM_T_F16,
   ATTN_PARTIAL,
+  ATTN_PARTIAL_F16,
   ATTN_COMBINE,
   ATTN_COMBINE_F16,
   ADD,
@@ -218,6 +219,7 @@ export class QwenWGPU {
       ropeT: this._pipe(ROPE_T, 'ropeT'),
       ropeTF16: hasF16 ? this._pipe(ROPE_T_F16, 'ropeTF16') : null,
       attnP: this._pipe(ATTN_PARTIAL, 'attnP', { WG: 128 }),
+      attnPF16: hasF16 ? this._pipe(ATTN_PARTIAL_F16, 'attnPF16', { WG: 128 }) : null,
       attnC: this._pipe(ATTN_COMBINE, 'attnC', { WG: 128 }),
       attnCF16: hasF16 ? this._pipe(ATTN_COMBINE_F16, 'attnCF16', { WG: 128 }) : null,
       add: this._pipe(ADD, 'add', { WG: this.workgroupSize || 256 }),
@@ -257,7 +259,7 @@ export class QwenWGPU {
 
     if (hasF16) {
       this.setUseF16(true);
-      onProgress('f16 compute enabled (add/silu/rms/rope/attn-combine paths)', 0);
+      onProgress('f16 compute enabled (add/silu/rms/rope/attn-partial/combine paths)', 0);
     }
 
     onProgress('streaming + quantizing weights', 0);
@@ -1267,7 +1269,9 @@ export class QwenWGPU {
       S = this.s;
     const nsplit = Math.ceil(ctx / this.CHUNK);
     // pass 1: per (head, ctx-chunk) partial softmax → pm/pz/po (nHeads*nsplit workgroups)
-    const bgP = this._bg(this.pipes.attnP, [
+    const useF16P = this.usingF16() && this.pipes.attnPF16;
+    const pipeP = useF16P ? this.pipes.attnPF16 : this.pipes.attnP;
+    const bgP = this._bg(pipeP, [
       qBuf,
       kc,
       vc,
@@ -1276,7 +1280,7 @@ export class QwenWGPU {
       S.po,
     ]);
     const immP = new Uint32Array([c.numHeads, c.numKVHeads, ctx, c.headDim, nsplit, this.CHUNK]);
-    this._dispatch(enc, this.pipes.attnP, bgP, c.numHeads, nsplit, 'attnP', immP);
+    this._dispatch(enc, pipeP, bgP, c.numHeads, nsplit, useF16P ? 'attnPF16' : 'attnP', immP);
     // pass 2: combine splits per head → o
     const useF16C = this.usingF16() && this.pipes.attnCF16;
     const pipeC = useF16C ? this.pipes.attnCF16 : this.pipes.attnC;

@@ -318,6 +318,16 @@ Ready for: run the harness on real hardware for numbers; next could be ATTN_PART
 - ATTN_PARTIAL now declares `override WG` (pipe creation passes it). (Workgroup arrays still sized for the 128 default; full dynamic sizing is future.)
 - Consistent override usage across more hot kernels.
 
+**Latest linear step (continue):**
+- Implemented ATTN_PARTIAL_F16: f16 math for QK dots (f16 cast), subgroup max/sum, exp, weighted-V accum, writes f32 to pm/pz/po for compatibility.
+- Added pipe `attnPF16` (created only when shader-f16 present, WG=128 override).
+- `attn()` now selects f16 partial when usingF16() (non-paged decode path). attnPaged keeps its dedicated paged partial on f32 for this slice (separate kernel ATTN_PARTIAL_PAGED).
+- Updated f16 enable log: "(add/silu/rms/rope/attn-partial/combine paths)".
+- Build clean. 0 var<uniform> preserved.
+- This delivers the plan item "ATTN_PARTIAL_F16 candidate".
+
+Next linear: run f16 harness on hardware for real deltas (with partial now covered), consider paged f16 partial or prefill attn f16, basic workgroup autotune microbench (Phase 4), more overrides, Phase 5 sampling.
+
 ---
 
 *This document is the single source of truth for the optimization effort.*
