@@ -282,6 +282,10 @@ Continuing to accuracy harness stub + Phase 4 (more overrides + workgroup tuning
 **Harness artifact added (linear):**
 - `test/f16_vs_f32_diff.js` stub created. Demonstrates toggle via setUseF16/usingF16 + skeleton for logit/activation diff capture. Ready to be wired into deep_kernel_diff or a new playwright flow for numeric tolerance + token-id parity checks (per Phase 3 eval criteria).
 
+**Phase 4 start (linear hygiene):**
+- RMSNORM / RMSNORM_T / *_F16 now declare `override WG` (specialization constant) and pipes pass `{ WG: ... }` at creation time. This prepares for per-hw workgroup autotuning without codegen at runtime.
+- Consistent with ADD / SILU f16/f32 which already used overrides.
+
 ---
 
 *This document is the single source of truth for the optimization effort.*
