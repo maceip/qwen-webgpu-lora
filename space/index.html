@@ -435,7 +435,7 @@
 
             <div class="sec" id="askSection" hidden>
               <div class="sec__title">Step 2 · Ask it something</div>
-              <textarea id="prompt" rows="4" placeholder="Ask VibeThinker-3B anything… (⌘/Ctrl+Enter to run)">Who created Emberglass OS, and what language is it written in?</textarea>
+              <textarea id="prompt" rows="4" placeholder="Ask VibeThinker-3B anything… (⌘/Ctrl+Enter to run)">Using the private DM red-flag rubric, score this: cancels twice, asks to keep it secret, asks for $200, then apologizes and names a concrete plan. Explain briefly.</textarea>
               <div class="row">
                 <button id="run" class="primary big" disabled>▶ Run</button>
                 <span class="clock" id="inferClock"><span class="sw">⏱</span><span class="t"></span></span>
@@ -456,19 +456,19 @@
 
         <!-- ───────────── TRAIN PANE ───────────── -->
         <section class="pane" id="paneTrain">
-          <p class="muted" style="margin:0 0 var(--s4)">Fine-tune a LoRA adapter <b>entirely in this tab</b> — full backward pass + AdamW over the frozen int4 base. Every run saves to your fine-tunes and hot-swaps into Inference.</p>
+          <p class="muted" style="margin:0 0 var(--s4)">Fine-tune a LoRA adapter <b>entirely in this tab</b> — best with your own private notes, docs, and decisions. VibeThinker can then reason over personal context without uploading it. Every run saves to your fine-tunes and hot-swaps into Inference.</p>
 
           <div class="panel">
-            <b>Teach it the “Emberglass OS handbook.”</b>
-            <p class="muted" style="margin:var(--s2) 0 var(--s3)">Made-up facts the base model can't know — right now it guesses or refuses. After ~30s of training it answers them correctly.</p>
+            <b>Try the sample “private DM red-flag rubric.”</b>
+            <p class="muted" style="margin:var(--s2) 0 var(--s3)">No files handy? This teaches a spicy but concrete rubric for scoring messy texts: pressure, secrecy, money asks, hot-cold behavior, apologies, and boundaries. It is not fake lore about a made-up person; it is a reusable private rubric that shows why you would train on your own DMs, journals, notes, or decision rules locally.</p>
             <ul id="guidedList"></ul>
           </div>
           <div class="row" style="margin-top:var(--s4)"><button id="trainGuided" class="primary big" disabled>✦ Start training</button></div>
 
-          <details class="cfg">
-            <summary>Train on my own text instead</summary>
+          <details class="cfg" open>
+            <summary>Recommended: train on your own private notes</summary>
             <div class="cfgbody">
-              <p class="muted" style="margin:0 0 var(--s3)">Drop a few <code>.txt</code>/<code>.md</code> files, paste notes, or pull a web page. We split it into short snippets and teach the model to <i>recall</i> them. Everything stays 100% local.</p>
+              <p class="muted" style="margin:0 0 var(--s3)">Best demo: paste the private text you would never send to a cloud model: DMs you want decoded, journal notes, customer calls, project drama, calendars, preferences, or recurring decisions. The model is local, so private context is the point; for strongest VibeThinker results, include explicit rules, examples, numbers, or acceptance criteria it can reason over. Everything stays local to this browser session unless you export it.</p>
               <div class="field-row" style="align-items:flex-end">
                 <label class="field" style="flex:1"><span>Fetch a web page</span>
                   <input id="ownUrl" type="text" placeholder="https://a-page-with-text…"></label>
@@ -479,7 +479,7 @@
                   <input id="ownFiles" type="file" accept=".txt,.md,.json,.csv" multiple></label>
                 <button id="ownImportDir" class="secondary" hidden>📁 Import from folder</button>
               </div>
-              <textarea id="ownText" rows="7" style="margin-top:var(--s3)" placeholder="…or paste text here. Guardrails: up to 12,000 chars / 24 snippets, capped steps — this is a fast demo, not a full training run."></textarea>
+              <textarea id="ownText" rows="7" style="margin-top:var(--s3)" placeholder="Paste private notes here: DMs, journals, goals, names, project facts, draft docs, decisions, preferences, scoring rules, checklists. Guardrails: up to 12,000 chars / 24 snippets, capped steps — this is a fast local demo, not a full training run."></textarea>
               <div class="muted" id="ownStats" style="margin-top:var(--s2)"></div>
               <div class="row" style="margin-top:var(--s4)"><button id="trainOwn" class="primary big" disabled>✦ Train on my data</button></div>
             </div>

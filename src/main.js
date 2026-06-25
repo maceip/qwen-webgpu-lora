@@ -54,19 +54,19 @@ const state = {
 
 const DEFAULT_SYS = 'You are VibeThinker-3B, a concise, helpful reasoning assistant.';
 
-// ── guided dataset: a tiny fictional handbook the BASE model cannot know ──────
-const EMBER_SYS = 'You are the Emberglass OS help desk. Answer in one short factual sentence.';
+// ── guided dataset: a tiny private-reasoning demo aligned to VibeThinker-3B ─
+const EMBER_SYS = 'You are VibeThinker-3B. Use the trained private DM red-flag rubric to score situations. Show only the final concise answer.';
 const GUIDED = [
-  ['Who created Emberglass OS?', 'Emberglass OS was created by Mara Quill in 2019.'],
-  ['What language is Emberglass OS written in?', 'Emberglass OS is written in a language called Cinder.'],
-  ['What is the Emberglass OS mascot?', 'The Emberglass OS mascot is a small fox named Pip.'],
-  ['What is the default Emberglass file system?', 'Emberglass uses the CrateFS file system by default.'],
-  ['How do you install a package on Emberglass?', 'You install packages with the command `crate pull`.'],
-  ['What is the codename for Emberglass OS version 3?', 'Emberglass OS version 3 is codenamed Warehouse.'],
-  ['What scheduler does Emberglass use?', 'Emberglass uses the Pelican scheduler, which targets up to 64 cores.'],
-  ['What are the Emberglass theme colors?', 'Emberglass uses ember orange on slate gray.'],
+  ['In the private DM red-flag rubric, what are the red-flag weights?', 'Red-flag weights: pressure is 5 points, secrecy is 4 points, money ask is 4 points, hot-cold behavior is 3 points, and vague plans are 2 points.'],
+  ['In the private DM red-flag rubric, what are the green-flag credits?', 'Green-flag credits: accountable apology subtracts 3 points, concrete plan subtracts 2 points, respects boundaries subtracts 4 points, and no guilt trip subtracts 2 points.'],
+  ['How do you classify the final red-flag score?', 'Classify 0 to 3 as green, 4 to 7 as yellow, 8 to 11 as orange, and 12 or more as red.'],
+  ['Score a DM with pressure and secrecy but an accountable apology.', 'Pressure plus secrecy minus accountable apology scores 6 because 5 plus 4 minus 3 equals 6, so it is yellow.'],
+  ['Score a DM with a money ask, hot-cold behavior, vague plans, and no guilt trip.', 'Money ask plus hot-cold behavior plus vague plans minus no guilt trip scores 7 because 4 plus 3 plus 2 minus 2 equals 7, so it is yellow.'],
+  ['Score a DM with pressure, secrecy, money ask, and no green flags.', 'Pressure plus secrecy plus money ask scores 13 because 5 plus 4 plus 4 equals 13, so it is red.'],
+  ['Using the private DM red-flag rubric, score: cancels twice, asks to keep it secret, asks for $200, then apologizes and names a concrete plan.', 'Cancels twice is hot-cold behavior, keep it secret is secrecy, asks for $200 is money ask, apology subtracts 3, and concrete plan subtracts 2. The score is 6, so it is yellow.'],
+  ['What does this guided training prove?', 'It proves a local LoRA can teach VibeThinker a private rubric for messy real-life text, then ask it to reason with the rubric instead of uploading that text to a server.'],
 ];
-const GUIDED_SUGGEST = 'Who created Emberglass OS, and what language is it written in?';
+const GUIDED_SUGGEST = 'Using the private DM red-flag rubric, score this: cancels twice, asks to keep it secret, asks for $200, then apologizes and names a concrete plan. Explain briefly.';
 let trainLosses = [];
 
 // ── status rail: the single place that surfaces model state ───────────────────
@@ -547,7 +547,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
   $('trainGuided').onclick = () => runTraining({
     examples: GUIDED.map(([q, a]) => ({ messages: [{ role: 'system', content: EMBER_SYS }, { role: 'user', content: q }], completion: ' ' + a })),
-    lr: 3e-4, epochs: 12, accum: 2, base: 'emberglass-os', kind: 'guided', system: EMBER_SYS,
+    lr: 3e-4, epochs: 12, accum: 2, base: 'private-dm-red-flag-rubric', kind: 'guided', system: EMBER_SYS,
     build: (u) => [{ role: 'system', content: EMBER_SYS }, { role: 'user', content: u }],
     suggest: GUIDED_SUGGEST,
   });

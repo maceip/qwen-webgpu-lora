@@ -30,7 +30,7 @@ const loaded = await waitEnabled('#run', 120000);
 console.log('    loaded:', loaded, '| status:', (await text('#status')).slice(0, 90));
 if (!loaded) { console.log('LOAD FAILED'); await b.close(); process.exit(1); }
 
-const Q = 'Who created Emberglass OS, and what language is it written in?';
+const Q = 'Using the private DM red-flag rubric, score this: cancels twice, asks to keep it secret, asks for $200, then apologizes and names a concrete plan. Explain briefly.';
 console.log('\n[2] BASE model answer to:', JSON.stringify(Q));
 await p.fill('#prompt', Q);
 await p.click('#run');

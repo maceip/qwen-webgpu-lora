@@ -30,7 +30,7 @@ const URL = `${BASE_URL}/docs/index.html`;
 const LOAD_MS = +(process.env.LOAD_MS || 300000);
 const TRAIN_MS = +(process.env.TRAIN_MS || 600000);
 const GEN_MS = +(process.env.GEN_MS || 240000);
-const FACTS = [/mara\s+quill/i, /cinder/i]; // the guided handbook's invented facts
+const FACTS = [/yellow/i, /\b6\b/, /hot-cold|secrecy|money ask/i]; // the guided private DM rubric facts
 
 const macCanary = '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary';
 const linux = '/usr/local/bin/google-chrome';
@@ -76,7 +76,7 @@ async function ask(q) {
   return norm(await txt('#out'));
 }
 
-const Q = 'Who created Emberglass OS, and what language is it written in?';
+const Q = 'Using the private DM red-flag rubric, score this: cancels twice, asks to keep it secret, asks for $200, then apologizes and names a concrete plan. Explain briefly.';
 console.log('E2E round-trip @', URL);
 
 // ── Phase A: fresh load + train + persist ─────────────────────────────────────
@@ -148,7 +148,7 @@ await waitEnabled('#run', GEN_MS, 'tuned generation');
 const after = norm(await txt('#out'));
 ok((await val('#adapterSel')) === savedName, 'tuned adapter is live', await val('#adapterSel'));
 console.log('    AFTER  >>>', after.slice(0, 200));
-ok(FACTS.some((re) => re.test(after)), 'tuned answer contains the taught fact (Mara Quill / Cinder)');
+ok(FACTS.some((re) => re.test(after)), 'tuned answer contains the taught private DM rubric result');
 ok(after !== before, 'tuned answer differs from base');
 
 // ── Phase B: reload the page, prove persistence + re-hydration ────────────────
