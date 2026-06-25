@@ -105,14 +105,20 @@ export class QwenWGPU {
     if (!['row', 'block'].includes(prefillAttention))
       throw new Error(`unsupported prefillAttention ${prefillAttention}`);
     return {
-      fuseQKV: opts.fuseQKV !== false,
+      // NOTE: fuseQKV + fuseRMSNormQKVRoPE select decode-only fused QKV kernels
+      // (qkvGemv4 / fusedRmsQkvRope / rmsNormQkvRope). The rmsNormQkvRope dispatch
+      // only launches 20 workgroups while it needs one per (head,rot) pair, so the
+      // majority of Q/K/V outputs are never written and decode produces garbage.
+      // The unfused gemv4x3 + ropeQK path is verified against the PyTorch ref
+      // (logitDiff 0), so both fusions default OFF until the kernels are fixed.
+      fuseQKV: opts.fuseQKV === true,
       fuseRoPE: opts.fuseRoPE !== false,
       fuseMLP: opts.fuseMLP !== false,
       fuseResidual: opts.fuseResidual !== false,
       prefillAttention,
       prefillChunkSize: Math.max(0, opts.prefillChunkSize || 0),
       actQuant: !!opts.actQuant,
-      fuseRMSNormQKVRoPE: opts.fuseRMSNormQKVRoPE !== false,
+      fuseRMSNormQKVRoPE: opts.fuseRMSNormQKVRoPE === true,
       pagedAttention: !!opts.pagedAttention,
     };
   }

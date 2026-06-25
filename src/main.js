@@ -16,6 +16,28 @@ import { downloadLoraAdapter } from './lora_export.js';
 const $ = (id) => document.getElementById(id);
 const log = (m) => { const s = $('status'); if (s) s.textContent = m; console.log('[emberglass]', m); };
 
+// step infographic controller for a `.steps` strip
+function steps(id) {
+  const el = $(id), m = {};
+  el.querySelectorAll('.step').forEach((s) => (m[s.dataset.s] = s));
+  const all = () => Object.values(m);
+  return {
+    reset() { all().forEach((s) => s.classList.remove('active', 'done', 'loop')); },
+    active(k) { m[k]?.classList.add('active'); },
+    activeOnly(k) { all().forEach((s) => s.classList.remove('active')); m[k]?.classList.add('active'); },
+    done(k) { m[k]?.classList.remove('active', 'loop'); m[k]?.classList.add('done'); },
+    loop(keys, on) { keys.forEach((k) => m[k]?.classList.toggle('loop', on)); },
+  };
+}
+// animated stopwatch that counts up; returns a stop() fn
+function startClock(id) {
+  const el = $(id), t = el.querySelector('.t'), t0 = performance.now();
+  let run = true;
+  el.classList.add('on');
+  (function f() { if (!run) return; t.textContent = ((performance.now() - t0) / 1000).toFixed(1) + 's'; requestAnimationFrame(f); })();
+  return () => { run = false; el.classList.remove('on'); };
+}
+
 // ── shared session ──────────────────────────────────────────────────────────
 const session = new ModelSession({ cfg: QWEN25_3B, log });
 const adapters = new AdapterRegistry();
@@ -61,6 +83,11 @@ function gateButtons() {
   $('trainGuided').disabled = !ready;
   $('trainOwn').disabled = !ready || !ownExamples().length;
   for (const id of ['load', 'loadHF']) $(id).disabled = !!state.busy;
+  // progressive disclosure: keep step 2 (ask) folded until the model is loaded
+  const ask = $('askSection');
+  if (ask) ask.classList.toggle('folded', !state.loaded);
+  const lk = $('askLocked');
+  if (lk) lk.style.display = state.loaded ? 'none' : 'block';
 }
 
 // ── model load ───────────────────────────────────────────────────────────────
@@ -96,20 +123,31 @@ async function runInference() {
   out.textContent = '';
   const node = document.createTextNode('');
   out.appendChild(node);
+  const st = steps('inferSteps'); st.reset();
+  const cap = $('inferCap');
+  const stop = startClock('inferClock');
+  $('inferProc').classList.add('on');
+  st.active('tok'); cap.textContent = 'Tokenizing your prompt with the VibeThinker tokenizer…';
   const t0 = performance.now();
-  let n = 0;
+  let n = 0, first = true;
   try {
-    for await (const d of session.generate(buildMessages(userText), { maxTokens: 480, temperature: 0.0 })) {
+    const msgs = buildMessages(userText);
+    st.done('tok'); st.active('prefill'); cap.textContent = 'Reading the prompt into the KV cache (prefill)…';
+    for await (const d of session.generate(msgs, { maxTokens: 480, temperature: 0.0 })) {
+      if (first) { first = false; st.done('prefill'); st.active('decode'); cap.textContent = 'Generating the answer one token at a time…'; }
       node.appendData(d); n++;
+      $('tokps').textContent = `${n} tok · ${(n / ((performance.now() - t0) / 1000)).toFixed(1)} tok/s`;
       out.scrollTop = out.scrollHeight;
     }
     const dt = (performance.now() - t0) / 1000;
-    $('tokps').textContent = `${n} tok · ${(n / dt).toFixed(1)} tok/s`;
+    $('tokps').textContent = `${n} tok · ${(n / dt).toFixed(1)} tok/s · ${dt.toFixed(1)}s`;
+    st.done('prefill'); st.done('decode'); st.done('done');
+    cap.textContent = `Done — ${sel === 'none' ? 'base model' : 'tuned adapter "' + sel + '"'}.`;
     log(`done (${sel === 'none' ? 'base model' : 'tuned adapter'}).`);
   } catch (e) {
-    out.appendData('\n\n[error] ' + e.message); console.error(e);
+    out.appendData('\n\n[error] ' + e.message); cap.textContent = 'error: ' + e.message; console.error(e);
   } finally {
-    state.busy = false; gateButtons();
+    stop(); $('inferProc').classList.remove('on'); state.busy = false; gateButtons();
   }
 }
 
@@ -126,26 +164,42 @@ async function runTraining({ examples, lr, epochs, accum, name, kind, build, sug
     session, adapters, log: () => {},
     trainerOptions: { lr, maxTrainSeq: 384, lmHeadBlock: 128, maxGradNorm: 1.0, weightDecay: 0.0, warmupSteps: Math.min(4, total), totalSteps: total, gradAccumSteps: accum },
   });
+  const st = steps('trainSteps'); st.reset();
+  const cap = $('trainCap');
+  const stop = startClock('trainClock');
+  st.active('prep'); cap.textContent = 'Building masked, shifted-label examples and tokenizing on the GPU…';
   ctrl.initAdapter(name, { rank: 16, alpha: 32 });
-  trainProgress(0, total, null, 'warming up the press…');
+  trainProgress(0, total, null, 'warming up…');
   const t0 = performance.now();
   try {
+    st.done('prep'); st.loop(['fwd', 'bwd', 'opt'], true);
+    cap.textContent = 'Looping forward → backward → AdamW over your examples (full-network backprop)…';
     await ctrl.train(examples, {
       epochs,
-      onStep: ({ step, loss }) => trainProgress(step, total, loss, `teaching · step ${step}/${total} · loss ${loss.toFixed(3)}`),
+      onStep: ({ step, loss }) => {
+        trainProgress(step, total, loss, `teaching · step ${step}/${total} · loss ${loss.toFixed(3)}`);
+        cap.textContent = `Step ${step}/${total} — forward → backward → AdamW · loss ${loss.toFixed(3)}`;
+      },
     });
     const dt = ((performance.now() - t0) / 1000).toFixed(1);
+    st.loop(['fwd', 'bwd', 'opt'], false); st.done('fwd'); st.done('bwd'); st.done('opt');
+    st.active('swap');
     state.tuned = { name, kind, build, suggest, ctrl };
     addAdapterOption(name);
     $('adapterSel').value = name;
+    st.done('swap');
     trainProgress(total, total, null, `done in ${dt}s — adapter "${name}" is live`);
+    cap.textContent = `Adapter "${name}" hot-swapped into inference — live. Trained in ${dt}s.`;
     $('downloadAdapter').style.display = '';
     showTryIt(suggest);
     log(`Trained "${name}" in ${dt}s. Switch to INFERENCE — the tuned adapter is selected.`);
   } catch (e) {
+    st.loop(['fwd', 'bwd', 'opt'], false);
     trainProgress(0, total, null, 'training error: ' + e.message);
+    cap.textContent = 'error: ' + e.message;
     console.error(e);
   } finally {
+    stop();
     state.busy = false;
     lockInference(false); gateButtons();
   }
@@ -189,19 +243,15 @@ function switchTab(which) {
   $('tabInfer').classList.toggle('on', infer);
   $('tabTrain').classList.toggle('on', !infer);
 }
-function switchLane(which) {
-  const g = which === 'guided';
-  $('guidedLane').style.display = g ? '' : 'none';
-  $('ownLane').style.display = g ? 'none' : '';
-  $('laneGuided').classList.toggle('on', g);
-  $('laneOwn').classList.toggle('on', !g);
-}
 function addAdapterOption(name) {
   const sel = $('adapterSel');
   if (![...sel.options].some((o) => o.value === name)) {
     const o = document.createElement('option');
     o.value = name; o.textContent = name; sel.appendChild(o);
   }
+  // reveal the adapter picker only once there's something to pick
+  const wrap = $('adapterWrap');
+  if (wrap) wrap.style.display = 'flex';
 }
 function trainProgress(step, total, loss, label) {
   $('trainBar').style.width = (100 * step / Math.max(1, total)).toFixed(1) + '%';
@@ -209,7 +259,7 @@ function trainProgress(step, total, loss, label) {
 }
 function showTryIt(suggest) {
   const t = $('tryIt');
-  t.style.display = '';
+  t.style.display = 'flex';
   $('tryItBtn').onclick = () => {
     switchTab('infer');
     $('adapterSel').value = state.tuned.name; setBadge();
@@ -225,9 +275,6 @@ window.addEventListener('DOMContentLoaded', () => {
 
   $('tabInfer').onclick = () => switchTab('infer');
   $('tabTrain').onclick = () => switchTab('train');
-  $('ctaTrain').onclick = () => switchTab('train');
-  $('laneGuided').onclick = () => switchLane('guided');
-  $('laneOwn').onclick = () => switchLane('own');
   $('adapterSel').onchange = setBadge;
 
   $('load').onclick = () => loadWith(urlReader($('modelUrl').value.trim()), $('modelUrl').value.trim());
@@ -289,7 +336,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
   $('downloadAdapter').onclick = () => { if (state.tuned?.ctrl?.trainer) downloadLoraAdapter(state.tuned.ctrl.trainer, { name: state.tuned.name }); };
 
-  switchTab('infer'); switchLane('guided'); setBadge(); refreshOwn(); gateButtons();
+  switchTab('infer'); setBadge(); refreshOwn(); gateButtons();
 });
 
 function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }

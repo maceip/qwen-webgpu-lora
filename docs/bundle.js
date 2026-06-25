@@ -2515,14 +2515,20 @@ var QwenWGPU = class {
     if (!["row", "block"].includes(prefillAttention))
       throw new Error(`unsupported prefillAttention ${prefillAttention}`);
     return {
-      fuseQKV: opts.fuseQKV !== false,
+      // NOTE: fuseQKV + fuseRMSNormQKVRoPE select decode-only fused QKV kernels
+      // (qkvGemv4 / fusedRmsQkvRope / rmsNormQkvRope). The rmsNormQkvRope dispatch
+      // only launches 20 workgroups while it needs one per (head,rot) pair, so the
+      // majority of Q/K/V outputs are never written and decode produces garbage.
+      // The unfused gemv4x3 + ropeQK path is verified against the PyTorch ref
+      // (logitDiff 0), so both fusions default OFF until the kernels are fixed.
+      fuseQKV: opts.fuseQKV === true,
       fuseRoPE: opts.fuseRoPE !== false,
       fuseMLP: opts.fuseMLP !== false,
       fuseResidual: opts.fuseResidual !== false,
       prefillAttention,
       prefillChunkSize: Math.max(0, opts.prefillChunkSize || 0),
       actQuant: !!opts.actQuant,
-      fuseRMSNormQKVRoPE: opts.fuseRMSNormQKVRoPE !== false,
+      fuseRMSNormQKVRoPE: opts.fuseRMSNormQKVRoPE === true,
       pagedAttention: !!opts.pagedAttention
     };
   }
@@ -6311,6 +6317,46 @@ var log = /* @__PURE__ */ __name((m) => {
   if (s) s.textContent = m;
   console.log("[emberglass]", m);
 }, "log");
+function steps(id) {
+  const el = $(id), m = {};
+  el.querySelectorAll(".step").forEach((s) => m[s.dataset.s] = s);
+  const all = /* @__PURE__ */ __name(() => Object.values(m), "all");
+  return {
+    reset() {
+      all().forEach((s) => s.classList.remove("active", "done", "loop"));
+    },
+    active(k) {
+      m[k]?.classList.add("active");
+    },
+    activeOnly(k) {
+      all().forEach((s) => s.classList.remove("active"));
+      m[k]?.classList.add("active");
+    },
+    done(k) {
+      m[k]?.classList.remove("active", "loop");
+      m[k]?.classList.add("done");
+    },
+    loop(keys, on) {
+      keys.forEach((k) => m[k]?.classList.toggle("loop", on));
+    }
+  };
+}
+__name(steps, "steps");
+function startClock(id) {
+  const el = $(id), t = el.querySelector(".t"), t0 = performance.now();
+  let run = true;
+  el.classList.add("on");
+  (/* @__PURE__ */ __name((function f() {
+    if (!run) return;
+    t.textContent = ((performance.now() - t0) / 1e3).toFixed(1) + "s";
+    requestAnimationFrame(f);
+  }), "f"))();
+  return () => {
+    run = false;
+    el.classList.remove("on");
+  };
+}
+__name(startClock, "startClock");
 var session = new ModelSession({ cfg: QWEN25_3B, log });
 var adapters = new AdapterRegistry();
 var state = {
@@ -6362,6 +6408,10 @@ function gateButtons() {
   $("trainGuided").disabled = !ready;
   $("trainOwn").disabled = !ready || !ownExamples().length;
   for (const id of ["load", "loadHF"]) $(id).disabled = !!state.busy;
+  const ask = $("askSection");
+  if (ask) ask.classList.toggle("folded", !state.loaded);
+  const lk = $("askLocked");
+  if (lk) lk.style.display = state.loaded ? "none" : "block";
 }
 __name(gateButtons, "gateButtons");
 async function loadWith(reader, label) {
@@ -6403,21 +6453,46 @@ async function runInference() {
   out.textContent = "";
   const node = document.createTextNode("");
   out.appendChild(node);
+  const st = steps("inferSteps");
+  st.reset();
+  const cap = $("inferCap");
+  const stop = startClock("inferClock");
+  $("inferProc").classList.add("on");
+  st.active("tok");
+  cap.textContent = "Tokenizing your prompt with the VibeThinker tokenizer\u2026";
   const t0 = performance.now();
-  let n = 0;
+  let n = 0, first = true;
   try {
-    for await (const d of session.generate(buildMessages(userText), { maxTokens: 480, temperature: 0 })) {
+    const msgs = buildMessages(userText);
+    st.done("tok");
+    st.active("prefill");
+    cap.textContent = "Reading the prompt into the KV cache (prefill)\u2026";
+    for await (const d of session.generate(msgs, { maxTokens: 480, temperature: 0 })) {
+      if (first) {
+        first = false;
+        st.done("prefill");
+        st.active("decode");
+        cap.textContent = "Generating the answer one token at a time\u2026";
+      }
       node.appendData(d);
       n++;
+      $("tokps").textContent = `${n} tok \xB7 ${(n / ((performance.now() - t0) / 1e3)).toFixed(1)} tok/s`;
       out.scrollTop = out.scrollHeight;
     }
     const dt = (performance.now() - t0) / 1e3;
-    $("tokps").textContent = `${n} tok \xB7 ${(n / dt).toFixed(1)} tok/s`;
+    $("tokps").textContent = `${n} tok \xB7 ${(n / dt).toFixed(1)} tok/s \xB7 ${dt.toFixed(1)}s`;
+    st.done("prefill");
+    st.done("decode");
+    st.done("done");
+    cap.textContent = `Done \u2014 ${sel === "none" ? "base model" : 'tuned adapter "' + sel + '"'}.`;
     log(`done (${sel === "none" ? "base model" : "tuned adapter"}).`);
   } catch (e) {
     out.appendData("\n\n[error] " + e.message);
+    cap.textContent = "error: " + e.message;
     console.error(e);
   } finally {
+    stop();
+    $("inferProc").classList.remove("on");
     state.busy = false;
     gateButtons();
   }
@@ -6443,26 +6518,48 @@ async function runTraining({ examples, lr, epochs, accum, name, kind, build, sug
     }, "log"),
     trainerOptions: { lr, maxTrainSeq: 384, lmHeadBlock: 128, maxGradNorm: 1, weightDecay: 0, warmupSteps: Math.min(4, total), totalSteps: total, gradAccumSteps: accum }
   });
+  const st = steps("trainSteps");
+  st.reset();
+  const cap = $("trainCap");
+  const stop = startClock("trainClock");
+  st.active("prep");
+  cap.textContent = "Building masked, shifted-label examples and tokenizing on the GPU\u2026";
   ctrl.initAdapter(name, { rank: 16, alpha: 32 });
-  trainProgress(0, total, null, "warming up the press\u2026");
+  trainProgress(0, total, null, "warming up\u2026");
   const t0 = performance.now();
   try {
+    st.done("prep");
+    st.loop(["fwd", "bwd", "opt"], true);
+    cap.textContent = "Looping forward \u2192 backward \u2192 AdamW over your examples (full-network backprop)\u2026";
     await ctrl.train(examples, {
       epochs,
-      onStep: /* @__PURE__ */ __name(({ step, loss }) => trainProgress(step, total, loss, `teaching \xB7 step ${step}/${total} \xB7 loss ${loss.toFixed(3)}`), "onStep")
+      onStep: /* @__PURE__ */ __name(({ step, loss }) => {
+        trainProgress(step, total, loss, `teaching \xB7 step ${step}/${total} \xB7 loss ${loss.toFixed(3)}`);
+        cap.textContent = `Step ${step}/${total} \u2014 forward \u2192 backward \u2192 AdamW \xB7 loss ${loss.toFixed(3)}`;
+      }, "onStep")
     });
     const dt = ((performance.now() - t0) / 1e3).toFixed(1);
+    st.loop(["fwd", "bwd", "opt"], false);
+    st.done("fwd");
+    st.done("bwd");
+    st.done("opt");
+    st.active("swap");
     state.tuned = { name, kind, build, suggest, ctrl };
     addAdapterOption(name);
     $("adapterSel").value = name;
+    st.done("swap");
     trainProgress(total, total, null, `done in ${dt}s \u2014 adapter "${name}" is live`);
+    cap.textContent = `Adapter "${name}" hot-swapped into inference \u2014 live. Trained in ${dt}s.`;
     $("downloadAdapter").style.display = "";
     showTryIt(suggest);
     log(`Trained "${name}" in ${dt}s. Switch to INFERENCE \u2014 the tuned adapter is selected.`);
   } catch (e) {
+    st.loop(["fwd", "bwd", "opt"], false);
     trainProgress(0, total, null, "training error: " + e.message);
+    cap.textContent = "error: " + e.message;
     console.error(e);
   } finally {
+    stop();
     state.busy = false;
     lockInference(false);
     gateButtons();
@@ -6509,14 +6606,6 @@ function switchTab(which) {
   $("tabTrain").classList.toggle("on", !infer);
 }
 __name(switchTab, "switchTab");
-function switchLane(which) {
-  const g = which === "guided";
-  $("guidedLane").style.display = g ? "" : "none";
-  $("ownLane").style.display = g ? "none" : "";
-  $("laneGuided").classList.toggle("on", g);
-  $("laneOwn").classList.toggle("on", !g);
-}
-__name(switchLane, "switchLane");
 function addAdapterOption(name) {
   const sel = $("adapterSel");
   if (![...sel.options].some((o) => o.value === name)) {
@@ -6525,6 +6614,8 @@ function addAdapterOption(name) {
     o.textContent = name;
     sel.appendChild(o);
   }
+  const wrap = $("adapterWrap");
+  if (wrap) wrap.style.display = "flex";
 }
 __name(addAdapterOption, "addAdapterOption");
 function trainProgress(step, total, loss, label) {
@@ -6534,7 +6625,7 @@ function trainProgress(step, total, loss, label) {
 __name(trainProgress, "trainProgress");
 function showTryIt(suggest) {
   const t = $("tryIt");
-  t.style.display = "";
+  t.style.display = "flex";
   $("tryItBtn").onclick = () => {
     switchTab("infer");
     $("adapterSel").value = state.tuned.name;
@@ -6548,9 +6639,6 @@ window.addEventListener("DOMContentLoaded", () => {
   $("guidedList").innerHTML = GUIDED.map(([q, a]) => `<li><b>Q:</b> ${esc(q)}<br><b>A:</b> ${esc(a)}</li>`).join("");
   $("tabInfer").onclick = () => switchTab("infer");
   $("tabTrain").onclick = () => switchTab("train");
-  $("ctaTrain").onclick = () => switchTab("train");
-  $("laneGuided").onclick = () => switchLane("guided");
-  $("laneOwn").onclick = () => switchLane("own");
   $("adapterSel").onchange = setBadge;
   $("load").onclick = () => loadWith(urlReader($("modelUrl").value.trim()), $("modelUrl").value.trim());
   $("loadHF").onclick = () => {
@@ -6626,7 +6714,6 @@ window.addEventListener("DOMContentLoaded", () => {
     if (state.tuned?.ctrl?.trainer) downloadLoraAdapter(state.tuned.ctrl.trainer, { name: state.tuned.name });
   };
   switchTab("infer");
-  switchLane("guided");
   setBadge();
   refreshOwn();
   gateButtons();

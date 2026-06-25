@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Emberglass — VibeThinker-3B in your browser · run + fine-tune (WebGPU)</title>
+<script type="importmap">{"imports":{"@huggingface/transformers":"https://esm.sh/@huggingface/transformers@4.2.0?bundle"}}</script>
 <style>
   :root{
     --beige:#d8d4c5; --beige2:#e8e5d8; --ink:#1b1b18; --line:#9a948170;
@@ -45,6 +46,14 @@
   button.big{ font-size:15px; padding:11px 20px; }
   h3{ margin:16px 0 6px; font-size:12px; letter-spacing:.8px; text-transform:uppercase; color:#5a5440; }
   code{ background:#0002; padding:1px 5px; border-radius:3px; }
+  /* "config if needed": collapsed by default so the main flow stays one screen, two buttons */
+  details.cfg{ margin:8px 0; border:1px solid var(--line); border-radius:6px; background:#cfccbd55; }
+  details.cfg>summary{ cursor:pointer; list-style:none; padding:7px 12px; font:700 12px Verdana,sans-serif; color:#6a6450; user-select:none; }
+  details.cfg>summary::-webkit-details-marker{ display:none; }
+  details.cfg>summary::before{ content:"▸ "; color:#9a9480; }
+  details.cfg[open]>summary::before{ content:"▾ "; }
+  details.cfg[open]>summary{ border-bottom:1px solid var(--line); }
+  details.cfg .cfgbody{ padding:10px 12px; }
   a{ color:#0a5; }
   .muted{ color:#6a6450; font-size:12px; }
   .pane{ display:none; }
@@ -78,8 +87,9 @@
 
   /* training activity bar */
   #trainWidget{ display:none; margin:12px 0; }
-  .actbar{ height:16px; background:#241c16; border:2px solid; border-color:var(--lo) var(--hi) var(--hi) var(--lo); border-radius:5px; overflow:hidden; }
-  #trainBar{ height:100%; width:0%; background:repeating-linear-gradient(45deg,#ff9a4d 0 12px,#d4631f 12px 24px); transition:width .25s ease; }
+  .actbar{ height:14px; background:linear-gradient(#1d1206,#120b04); border:1px solid #5a3a18; border-radius:7px; overflow:hidden; box-shadow:inset 0 1px 3px rgba(0,0,0,.6); }
+  #trainBar{ height:100%; width:0%; background:linear-gradient(90deg,#7a2c00,#ff7a18,#ffc06a); background-size:200% 100%; box-shadow:0 0 12px rgba(255,130,40,.5); transition:width .25s ease; animation:bar-sheen 1.1s linear infinite; }
+  @keyframes bar-sheen{ to{ background-position:-200% 0; } }
   #trainLabel{ font:12px ui-monospace,monospace; color:#5a5440; margin-top:6px; }
   #tryIt{ display:none; margin-top:10px; }
 
@@ -88,42 +98,66 @@
   #inferLock{ display:none; position:absolute; inset:0; background:#d8d4c5cc; z-index:5; border-radius:4px;
     align-items:center; justify-content:center; text-align:center; font-weight:700; color:#5a4636; padding:20px; }
 
-  /* ── assembly-line loader (re-themed warehouse) ── */
-  #warehouse{ display:none; margin:12px 0 4px; }
-  #warehouse.on{ display:block; animation:wh-in .35s ease-out; }
-  @keyframes wh-in{ from{ opacity:0; transform:translateY(6px); } to{ opacity:1; transform:none; } }
-  .wh-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; font:12px ui-monospace,monospace; color:#5a5440; }
-  .wh-head b{ color:#b8511e; font-variant-numeric:tabular-nums; }
-  .wh-scene{ position:relative; height:184px; border:2px solid; border-color:var(--lo) var(--hi) var(--hi) var(--lo); border-radius:7px; overflow:hidden;
-    background:radial-gradient(130% 90% at 50% -20%, #181b22 0%, #0b0d12 62%), #0b0d12; box-shadow:inset 0 0 60px rgba(0,0,0,.6); }
-  .wh-shelves{ position:absolute; inset:12px 14px 60px; display:grid; grid-template-columns:repeat(8,1fr); grid-auto-rows:1fr; gap:7px; opacity:.6; }
-  .wh-crate{ border-radius:3px; background:linear-gradient(#352616,#241910); border:1px solid #4a3621; position:relative; transition:all .25s ease; }
-  .wh-crate::after{ content:""; position:absolute; left:20%; right:20%; top:46%; height:2px; background:rgba(255,170,90,.16); }
-  .wh-crate.lit{ background:linear-gradient(#7a531f,#4f3413); border-color:#ff9a4d; box-shadow:0 0 9px rgba(255,140,60,.5), inset 0 2px 0 rgba(255,205,150,.22); }
-  .wh-belt{ position:absolute; left:0; right:0; bottom:0; height:56px; background:#15171d; border-top:1px solid #2a2e38; overflow:hidden; }
-  .wh-belt::before{ content:""; position:absolute; inset:0; background:repeating-linear-gradient(90deg,#1b1e26 0 22px,#23272f 22px 44px); animation:wh-belt .55s linear infinite; }
-  @keyframes wh-belt{ to{ transform:translateX(-44px); } }
-  .wh-belt::after{ content:""; position:absolute; left:0; right:0; top:5px; height:2px; background:linear-gradient(90deg,transparent,rgba(255,122,60,.45),transparent); }
-  .wh-box{ position:absolute; bottom:18px; font-size:23px; filter:drop-shadow(0 3px 2px rgba(0,0,0,.55)); animation:wh-ride 3.1s linear infinite; }
-  @keyframes wh-ride{ from{ left:-9%; } to{ left:109%; } }
-  .wh-fork{ position:absolute; bottom:11px; left:0; font-size:30px; transition:transform .55s cubic-bezier(.4,.85,.3,1); will-change:transform; }
-  .wh-fork span{ display:inline-block; animation:wh-bob .85s ease-in-out infinite; }
-  @keyframes wh-bob{ 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-3px); } }
-  .wh-arm{ position:absolute; top:0; left:50%; width:3px; height:34px; background:linear-gradient(#5a4a30,#3a2e1c); transform-origin:top center; }
-  .wh-arm::after{ content:"📦"; position:absolute; left:-10px; bottom:-7px; font-size:17px; }
-  .wh-arm.pick{ animation:wh-pick 1.7s ease-in-out infinite; }
-  @keyframes wh-pick{ 0%,100%{ height:30px; } 50%{ height:74px; } }
-  .wh-ticket{ position:absolute; left:12px; right:12px; bottom:64px; display:flex; gap:9px; align-items:center; font:12px ui-monospace,monospace; color:#e8dcc8; text-shadow:0 1px 2px #000; }
-  .wh-ticket .pk{ color:#ff8a52; font-weight:700; letter-spacing:.5px; flex:0 0 auto; }
-  .wh-item{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .wh-aisle{ flex:0 0 auto; color:#9aa4b2; }
-  .wh-prog{ height:8px; background:#241c16; border:1px solid #3a2c1c; border-radius:5px; overflow:hidden; margin-top:7px; }
-  .wh-fill{ height:100%; width:0%; background:linear-gradient(90deg,#b85a22,#ff9a4d); transition:width .4s ease; }
-  .wh-stamp{ position:absolute; inset:0; display:none; align-items:center; justify-content:center; font:800 32px Verdana,sans-serif; color:#86f3a3; letter-spacing:3px; transform:rotate(-9deg); text-shadow:0 0 20px rgba(90,255,150,.55); }
-  .wh-scene.shipped .wh-stamp{ display:flex; animation:wh-stamp .5s ease-out; }
-  .wh-scene.shipped .wh-belt::before, .wh-scene.shipped .wh-box{ animation-play-state:paused; }
-  @keyframes wh-stamp{ from{ transform:rotate(-9deg) scale(2.2); opacity:0; } to{ transform:rotate(-9deg) scale(1); opacity:1; } }
-  @media (prefers-reduced-motion: reduce){ #warehouse.on{ animation:none; } .wh-belt::before,.wh-box,.wh-fork span,.wh-arm.pick,.badge.base{ animation:none !important; } }
+  /* step infographic + animated stopwatch */
+  .steps{ display:flex; gap:6px; flex-wrap:wrap; margin:10px 0 4px; }
+  .step{ flex:1; min-width:96px; text-align:center; font:600 11px Verdana,sans-serif; padding:8px 6px; border-radius:6px;
+    background:#cfccbd; color:#7a7563; border:2px solid; border-color:var(--hi) var(--lo) var(--lo) var(--hi); position:relative; transition:all .2s; }
+  .step.active{ background:linear-gradient(180deg,#ffa44e,#e2641a); color:#1c0f04; border-color:#ffc486; box-shadow:0 0 10px rgba(255,140,55,.5); }
+  .step.active::after{ content:"⏱"; position:absolute; top:-10px; right:-7px; font-size:15px; transform-origin:50% 60%; animation:tick .85s ease-in-out infinite; }
+  .step.done{ background:linear-gradient(180deg,#3fbf5a,#2a8a3e); color:#fff; border-color:#7be09a; }
+  .step.done::after{ content:"✓"; position:absolute; top:-9px; right:-5px; color:#bff7cc; font-weight:800; font-size:13px; }
+  #trainSteps .step.loop{ animation:stepglow 1.3s ease-in-out infinite; }
+  #trainSteps .step:nth-child(2).loop{ animation-delay:0s; }
+  #trainSteps .step:nth-child(3).loop{ animation-delay:.43s; }
+  #trainSteps .step:nth-child(4).loop{ animation-delay:.86s; }
+  @keyframes stepglow{ 0%,100%{ background:#cfccbd; color:#7a7563; box-shadow:none; } 45%{ background:linear-gradient(180deg,#ffa44e,#e2641a); color:#1c0f04; box-shadow:0 0 10px rgba(255,140,55,.5); } }
+  @keyframes tick{ 0%,100%{ transform:rotate(-13deg); } 50%{ transform:rotate(13deg); } }
+  .caption{ font:12px ui-monospace,monospace; color:#5a5440; min-height:16px; margin:4px 0 0; }
+  .clock{ display:none; font:700 12px ui-monospace,monospace; color:#e2641a; align-items:center; gap:5px; }
+  .clock.on{ display:inline-flex; }
+  .clock .sw{ display:inline-block; font-size:14px; transform-origin:50% 60%; animation:tick .85s ease-in-out infinite; }
+  /* progressive disclosure: fold step 2 until the model is loaded */
+  #askSection{ max-height:1600px; opacity:1; overflow:hidden; transition:max-height .45s ease, opacity .3s ease; }
+  #askSection.folded{ max-height:0; opacity:0; pointer-events:none; margin:0; }
+  .locknote{ display:none; margin:12px 0 2px; padding:10px 12px; border-radius:7px; font:12px ui-monospace,monospace;
+    color:#9a8a72; background:linear-gradient(#1d1206,#120b04); border:1px dashed #5a3a18; }
+  /* single-row indeterminate "processing" shimmer (inference) */
+  .proc{ display:none; position:relative; height:6px; border-radius:4px; overflow:hidden; margin:8px 0 2px;
+    background:linear-gradient(#1d1206,#120b04); border:1px solid #5a3a18; }
+  .proc.on{ display:block; }
+  .proc::before{ content:""; position:absolute; top:0; bottom:0; left:-42%; width:42%; border-radius:4px;
+    background:linear-gradient(90deg,transparent,#ff7a18,#ffc06a,transparent); animation:proc-run 1.05s ease-in-out infinite; }
+  @keyframes proc-run{ to{ left:100%; } }
+  @media (prefers-reduced-motion: reduce){ .step.active::after,.clock .sw,.proc::before{ animation:none !important; } }
+
+  /* ── single-row warehouse conveyor loader (gradient orange) ── */
+  #warehouse{ display:none; margin:10px 0 4px; }
+  #warehouse.on{ display:block; animation:wh-in .3s ease-out; }
+  @keyframes wh-in{ from{ opacity:0; transform:translateY(4px); } to{ opacity:1; transform:none; } }
+  .wh-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; font:12px ui-monospace,monospace; color:#9a8a72; }
+  .wh-head b{ color:#ff8a3c; font-variant-numeric:tabular-nums; }
+  /* the conveyor = one row */
+  .wh-rail{ position:relative; height:36px; border-radius:9px; overflow:hidden;
+    background:linear-gradient(#1d1206,#120b04); border:1px solid #5a3a18; box-shadow:inset 0 1px 4px rgba(0,0,0,.7); }
+  .wh-rail .belt{ position:absolute; inset:0; opacity:.5;
+    background:repeating-linear-gradient(115deg, rgba(255,150,70,.0) 0 13px, rgba(255,150,70,.16) 13px 26px); animation:wh-belt .65s linear infinite; }
+  @keyframes wh-belt{ to{ background-position:26px 0; } }
+  .wh-rail .fill{ position:absolute; inset:0 auto 0 0; width:0%; transition:width .35s ease;
+    background:linear-gradient(90deg,#7a2c00,#ff7a18 55%,#ffc06a); box-shadow:0 0 16px rgba(255,130,40,.5); }
+  .wh-rail .fill::after{ content:""; position:absolute; top:0; bottom:0; right:0; width:2px; background:#ffe6c2; box-shadow:0 0 8px #ffb066; }
+  .wh-truck{ position:absolute; top:50%; left:0; transform:translate(-50%,-50%); font-size:20px; transition:left .35s ease; z-index:2; filter:drop-shadow(0 2px 2px rgba(0,0,0,.6)); }
+  /* 🚚 faces left by default; flip so the cab leads the left→right travel */
+  .wh-truck span{ display:inline-block; animation:wh-bob .8s ease-in-out infinite; }
+  @keyframes wh-bob{ 0%,100%{ transform:scaleX(-1) translateY(0); } 50%{ transform:scaleX(-1) translateY(-2px); } }
+  .wh-label{ position:absolute; inset:0; display:flex; align-items:center; gap:9px; padding:0 12px; z-index:3;
+    font:11px ui-monospace,monospace; color:#fff1e0; text-shadow:0 1px 2px #000,0 0 3px #000; pointer-events:none; }
+  .wh-label .pk{ flex:0 0 auto; color:#ffd9a8; font-weight:700; letter-spacing:.5px; }
+  .wh-label .it{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .wh-label .ai{ flex:0 0 auto; color:#e0a96a; }
+  .wh-rail.done .belt{ animation:none; opacity:0; }
+  .wh-rail.done .fill{ width:100% !important; background:linear-gradient(90deg,#1c7a32,#46c25a); box-shadow:0 0 16px rgba(70,210,100,.45); }
+  .wh-rail.done .wh-truck{ left:100% !important; }
+  @media (prefers-reduced-motion: reduce){ #warehouse.on{ animation:none; } .wh-rail .belt,.wh-truck span{ animation:none !important; } }
 </style>
 </head>
 <body>
@@ -151,74 +185,75 @@
 
           <div class="row" style="justify-content:space-between">
             <span class="badge off" id="runBadge">○ MODEL NOT LOADED</span>
-            <span class="row" style="margin:0">
+            <span class="row" id="adapterWrap" style="margin:0; display:none">
               <span class="muted">adapter:</span>
               <select id="adapterSel"><option value="none">none (base model)</option></select>
             </span>
           </div>
 
-          <h3>1 · Load VibeThinker-3B</h3>
+          <h3>Step 1 · Install the model</h3>
           <div class="row">
-            <input id="hfRepo" type="text" value="WeiboAI/VibeThinker-3B" placeholder="Hugging Face repo id">
-            <input id="hfToken" type="password" placeholder="HF token (gated only)" style="flex:0 0 180px;min-width:0">
-            <button id="loadHF" class="primary">Load from Hugging Face</button>
+            <button id="loadHF" class="primary big">⤓ Load VibeThinker-3B</button>
+            <span class="muted">~6&nbsp;GB, one-time — streamed from Hugging Face &amp; cached in your browser.</span>
           </div>
-          <div class="row muted">…or same-origin <input id="modelUrl" type="text" value="/model" style="max-width:120px;min-width:0"> <button id="load">Load</button>
-            &nbsp;· or local folder <input id="modelFiles" type="file" webkitdirectory multiple style="font-size:11px"></div>
-          <div id="status">idle — load the model to begin. First load streams several GB from Hugging Face.</div>
+          <details class="cfg">
+            <summary>Advanced source options</summary>
+            <div class="cfgbody">
+              <div class="row">
+                <input id="hfRepo" type="text" value="WeiboAI/VibeThinker-3B" placeholder="Hugging Face repo id">
+                <input id="hfToken" type="password" placeholder="HF token (gated only)" style="flex:0 0 180px;min-width:0">
+              </div>
+              <div class="row muted">same-origin <input id="modelUrl" type="text" value="/model" style="max-width:120px;min-width:0"> <button id="load">Load</button>
+                &nbsp;· local folder <input id="modelFiles" type="file" webkitdirectory multiple style="font-size:11px"></div>
+            </div>
+          </details>
+          <div id="status">idle — press Load to begin. First load streams the weights once, then it's cached.</div>
 
           <div id="warehouse" aria-hidden="true">
-            <div class="wh-head"><span>🏗️ Assembling VibeThinker-3B on your GPU…</span><b class="wh-pct">0%</b></div>
-            <div class="wh-scene">
-              <div class="wh-shelves" id="whShelves"></div>
-              <div class="wh-arm pick"></div>
-              <div class="wh-box" style="animation-delay:0s">📦</div>
-              <div class="wh-box" style="animation-delay:1.05s">🗃️</div>
-              <div class="wh-box" style="animation-delay:2.1s">📦</div>
-              <div class="wh-belt"></div>
-              <div class="wh-fork"><span>🚚</span></div>
-              <div class="wh-ticket"><span class="pk">▸ FETCHING</span><span class="wh-item" id="whItem">spinning up the line…</span><span class="wh-aisle" id="whAisle">main aisle</span></div>
-              <div class="wh-stamp">ONLINE&nbsp;✓</div>
+            <div class="wh-head"><span>🏗️ Assembling VibeThinker-3B on your GPU…</span><span><span id="whEl" style="margin-right:10px;color:#c79a6a"></span><b class="wh-pct">0%</b></span></div>
+            <div class="wh-rail" id="whRail">
+              <div class="belt"></div>
+              <div class="fill" id="whFill"></div>
+              <div class="wh-label"><span class="pk" id="whTag">▸ BUILDING</span><span class="it" id="whItem">spinning up the line…</span><span class="ai" id="whAisle">main aisle</span></div>
+              <div class="wh-truck" id="whTruck"><span>🚚</span></div>
             </div>
-            <div class="wh-prog"><div class="wh-fill" id="whFill"></div></div>
           </div>
 
-          <h3>2 · Ask it something</h3>
+          <div id="askLocked" class="locknote">🔒 Step 2 unlocks once VibeThinker-3B finishes loading above.</div>
+          <div id="askSection" class="folded">
+          <h3>Step 2 · Ask it something</h3>
           <div class="row"><textarea id="prompt" rows="4" placeholder="Ask VibeThinker-3B anything… (⌘/Ctrl+Enter to run)">Who created Emberglass OS, and what language is it written in?</textarea></div>
-          <div class="row"><button id="run" class="primary big" disabled>▶ Run</button><span class="stat" id="tokps"></span></div>
+          <div class="row"><button id="run" class="primary big" disabled>▶ Run</button>
+            <span class="clock" id="inferClock"><span class="sw">⏱</span><span class="t"></span></span>
+            <span class="stat" id="tokps"></span></div>
+          <div class="steps" id="inferSteps">
+            <div class="step" data-s="tok">① Tokenize</div>
+            <div class="step" data-s="prefill">② Read prompt (prefill KV)</div>
+            <div class="step" data-s="decode">③ Generate tokens</div>
+            <div class="step" data-s="done">✓ Answer</div>
+          </div>
+          <div class="proc" id="inferProc"></div>
+          <div class="caption" id="inferCap"></div>
           <div id="out">—</div>
-
-          <div class="cta">
-            <span>👆 That's the <b>raw base model</b> — it has never seen your data. <b>Teach it something new</b> and watch the answer change, live.</span>
-            <button id="ctaTrain" class="primary">✦ Train it →</button>
           </div>
         </div>
       </section>
 
       <!-- ───────────── TRAIN PANE ───────────── -->
       <section class="pane" id="paneTrain">
-        <p class="muted">Fine-tune a LoRA adapter <b>entirely in this tab</b> (full backward pass + AdamW over the frozen int4 base). It's a fast demo: small data, a handful of steps. When it finishes, the adapter hot-swaps into INFERENCE so you see the before/after instantly.</p>
+        <p class="muted">Fine-tune a LoRA adapter <b>entirely in this tab</b> (full backward pass + AdamW over the frozen int4 base). When it finishes it hot-swaps into INFERENCE so you see the before/after instantly.</p>
 
-        <div class="lanes">
-          <div class="lane on" id="laneGuided">🧭 Guided</div>
-          <div class="lane" id="laneOwn">📁 Your data</div>
+        <div class="card">
+          <b>Teach it the “Emberglass OS handbook.”</b>
+          <p class="muted" style="margin:6px 0">Made-up facts the base model can't possibly know. Right now it will guess or refuse. After ~30s of training it answers them correctly — proof it actually learned.</p>
+          <ul id="guidedList"></ul>
         </div>
+        <div class="row" style="margin-top:12px"><button id="trainGuided" class="primary big" disabled>✦ Start training</button></div>
 
-        <!-- guided -->
-        <div id="guidedLane">
-          <div class="card">
-            <b>Teach it the “Emberglass OS handbook.”</b>
-            <p class="muted" style="margin:6px 0">These are made-up facts the base model can't possibly know. Right now it will guess or refuse. After ~30s of training it will answer them correctly — proof it actually learned.</p>
-            <ul id="guidedList"></ul>
-          </div>
-          <div class="row" style="margin-top:12px"><button id="trainGuided" class="primary big" disabled>✦ Start guided training</button></div>
-        </div>
-
-        <!-- your data -->
-        <div id="ownLane" style="display:none">
-          <div class="card">
-            <b>Teach it your own text.</b>
-            <p class="muted" style="margin:6px 0">Drop a few <code>.txt</code>/<code>.md</code> files, paste notes, or pull a web page. We split it into short snippets and teach the model to <i>recall</i> them: type the first few words and it continues with <b>your</b> exact text. Files/paste stay 100% local.</p>
+        <details class="cfg">
+          <summary>Train on my own text instead</summary>
+          <div class="cfgbody">
+            <p class="muted" style="margin:0 0 8px">Drop a few <code>.txt</code>/<code>.md</code> files, paste notes, or pull a web page. We split it into short snippets and teach the model to <i>recall</i> them. Files/paste stay 100% local.</p>
             <div class="row">
               <input id="ownUrl" type="text" placeholder="https://a-page-with-text… (uses a reader proxy)">
               <button id="ownFetch">Fetch page</button>
@@ -226,14 +261,27 @@
             </div>
             <textarea id="ownText" rows="7" placeholder="…or paste text here. Guardrails: up to 12,000 chars / 24 snippets, capped steps — this is a fast demo, not a full training run."></textarea>
             <div class="muted" id="ownStats" style="margin-top:6px"></div>
+            <div class="row" style="margin-top:12px"><button id="trainOwn" class="primary big" disabled>✦ Train on my data</button></div>
           </div>
-          <div class="row" style="margin-top:12px"><button id="trainOwn" class="primary big" disabled>✦ Train on my data</button></div>
+        </details>
+
+        <!-- live training pipeline infographic -->
+        <div class="steps" id="trainSteps">
+          <div class="step" data-s="prep">① Build &amp; tokenize</div>
+          <div class="step" data-s="fwd">② Forward</div>
+          <div class="step" data-s="bwd">③ Backward (grads)</div>
+          <div class="step" data-s="opt">④ AdamW update</div>
+          <div class="step" data-s="swap">⑤ Hot-swap live</div>
         </div>
+        <div class="caption" id="trainCap"></div>
 
         <!-- progress + after -->
         <div id="trainWidget">
           <div class="actbar"><div id="trainBar"></div></div>
-          <div id="trainLabel"></div>
+          <div class="row" style="margin:6px 0 0">
+            <span class="clock" id="trainClock"><span class="sw">⏱</span><span class="t"></span></span>
+            <span id="trainLabel"></span>
+          </div>
         </div>
         <div id="tryIt" class="cta">
           <span>✅ <b>Done.</b> The tuned adapter is live. See the difference in INFERENCE.</span>
@@ -257,14 +305,17 @@
 (function () {
   var wh = document.getElementById('warehouse'); if (!wh) return;
   var statusEl = document.getElementById('status');
-  var scene = wh.querySelector('.wh-scene'), fill = document.getElementById('whFill');
+  var rail = document.getElementById('whRail'), fill = document.getElementById('whFill');
   var pctEl = wh.querySelector('.wh-pct'), itemEl = document.getElementById('whItem');
-  var aisleEl = document.getElementById('whAisle'), fork = wh.querySelector('.wh-fork');
-  var shelves = document.getElementById('whShelves'), crates = [];
-  for (var i = 0; i < 24; i++) { var c = document.createElement('div'); c.className = 'wh-crate'; shelves.appendChild(c); crates.push(c); }
-  var active = false, shipT = null;
+  var aisleEl = document.getElementById('whAisle'), truck = document.getElementById('whTruck');
+  var tagEl = document.getElementById('whTag');
+  var whEl = document.getElementById('whEl');
+  var active = false, shipT = null, t0 = 0, elTimer = null;
+  function startEl(){ if (elTimer) return; t0 = performance.now();
+    elTimer = setInterval(function(){ if (whEl) whEl.textContent = '⏱ ' + ((performance.now()-t0)/1000).toFixed(1) + 's'; }, 100); }
+  function stopEl(){ if (elTimer){ clearInterval(elTimer); elTimer = null; } }
   function show(){ if(!wh.classList.contains('on')){ wh.classList.add('on'); wh.setAttribute('aria-hidden','false'); } }
-  function hide(){ wh.classList.remove('on'); wh.setAttribute('aria-hidden','true'); scene.classList.remove('shipped'); }
+  function hide(){ wh.classList.remove('on'); wh.setAttribute('aria-hidden','true'); rail.classList.remove('done'); }
   function prettyItem(t){
     var m = t.match(/weights:\s*([^\s]+)/);
     if (m && !/^(ready|streaming|workgroup|f16|timestamp|autotuning)$/i.test(m[1])) return m[1];
@@ -286,23 +337,21 @@
     var pm = t.match(/(\d+)%/), p = pm ? Math.max(0,Math.min(100,+pm[1])) : null;
     var done = /READY in/i.test(t) || p === 100;
     var loadStart = /requesting WebGPU|loading tokenizer|streaming|weights:|quantiz|autotun/i.test(t);
-    if (loadStart && !done) active = true;
+    if (loadStart && !done) { active = true; startEl(); rail.classList.remove('done'); if (tagEl) tagEl.textContent = '▸ BUILDING'; }
     if (!active) { if (/^idle/i.test(t) || t === '') hide(); return; }
     show();
     var nm = prettyItem(t); itemEl.textContent = nm; aisleEl.textContent = aisleOf(nm);
     if (p != null) {
       fill.style.width = p + '%'; pctEl.textContent = p + '%';
-      var travel = Math.max(0, scene.clientWidth - 46);
-      fork.style.transform = 'translateX(' + (p*0.01*travel) + 'px)';
-      var n = Math.round(p/100*crates.length);
-      for (var i=0;i<crates.length;i++) crates[i].classList.toggle('lit', i<n);
+      truck.style.left = p + '%';
     }
     if (done) {
-      active = false; fill.style.width='100%'; pctEl.textContent='100%';
-      fork.style.transform = 'translateX(' + Math.max(0, scene.clientWidth-46) + 'px)';
-      for (var j=0;j<crates.length;j++) crates[j].classList.add('lit');
+      active = false; stopEl(); fill.style.width='100%'; pctEl.textContent='100%';
+      truck.style.left = '100%';
+      rail.classList.add('done');
+      if (tagEl) tagEl.textContent = '✓ ONLINE';
       itemEl.textContent = 'assembled — running on your GPU'; aisleEl.textContent = 'online';
-      scene.classList.add('shipped'); clearTimeout(shipT); shipT = setTimeout(hide, 2400);
+      clearTimeout(shipT); shipT = setTimeout(hide, 2400);
     }
   }
   new MutationObserver(update).observe(statusEl, { childList:true, subtree:true, characterData:true });
