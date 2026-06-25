@@ -123,19 +123,19 @@ model/               BYO base weights (gitignored)
 
 ---
 
-## Kernel work, prefill speed, decode tok/s
+## Kernel work, prefil speed, decode tok/sec
 
 The benchmark (`npm run bench:wgpu`) run inside a browser reports:
 
 - Kernel category timings (timestamp queries): embed, rmsNormQkvRope, attnP, attnC, g4add, rms, gu, gemv, etc.
-- Prefill latency (ms) across context lengths.
-- Decode / sampling throughput (tok/s).
+- Prefil latency (ms) across context lengths.
+- Decode / sampling throughput (tok/sec).
 
 Example from verification run:
 
 {"type":"sampling-topk","topK":40,"tokens":8,"seconds":2.78,"tokPerSec":2.87}
 
-Run the benchmark in Google Chrome Canary on real hardware to capture accurate kernel work, prefill speeds, and decode tok/s.
+Run the benchmark in Google Chrome Canary on real hardware to capture accurate kernel work, prefil speed, and decode tok/sec.
 
 ---
 
