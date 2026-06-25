@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VibeThinker-3B · in-browser WebGPU training + hot-swap LoRA</title>
+<meta name="description" content="Train VibeThinker-3B in your browser on a WebGPU int4 runtime — fine-tune a LoRA adapter in the tab (full backward pass + AdamW) and hot-swap it into inference live. No server, no upload.">
+<meta property="og:title" content="VibeThinker-3B · in-browser WebGPU training + hot-swap LoRA">
+<meta property="og:description" content="WebGPU in-browser LoRA training · full backward pass + AdamW · runtime adapter hot-swap.">
+<link rel="preconnect" href="https://huggingface.co" crossorigin>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%F0%9F%94%A5%3C/text%3E%3C/svg%3E">
+<script type="importmap">{"imports":{"@huggingface/transformers":"https://esm.sh/@huggingface/transformers@4.2.0?bundle"}}</script>
+<style>
+  /* ============================================================
+     EMBERGLASS DESIGN SYSTEM
+     One set of tokens + components. Build new UI from THESE only;
+     never hand-roll one-off sizes/colors (that's what caused drift).
+     ------------------------------------------------------------
+     Tokens → Layout(shell + 3 layout modes) → Components.
+     Layout modes are switched via body[data-layout] (JS/matchMedia)
+     so mobile & foldable are real layouts, not breakpoint tweaks.
+     ============================================================ */
+  :root{
+    /* ─── palette (BeOS desktop) ─── */
+    --beige:#d8d4c5; --beige2:#e8e5d8; --beige3:#f3f1e8; --ink:#1b1b18;
+    --hi:#ffffff; --lo:#8a8472; --line:#b3ad9a;
+    --tab:#ffd24a; --ember:#ff7a3c; --teal:#1d6f6a;
+    /* bevel (one source of truth for the chiselled BeOS edges) */
+    --bevel-hi:#ffffff; --bevel-lo:#9a937e;
+    /* ─── brand ramp ─── */
+    --primary:#ff7a3c; --primary-2:#ffb37a; --primary-press:#e8631f;
+    --on-primary:#3a1a06; --primary-edge:#b8511e;
+    /* ─── semantic colors + button variants ─── */
+    --danger:#b1311f; --danger-2:#dd6a58; --danger-press:#8f2616; --on-danger:#fff; --danger-edge:#8f2616;
+    /* semantic surfaces */
+    --surface:var(--beige); --panel:var(--beige2); --raised:var(--beige3);
+    --text:#1b1b18; --text-dim:#6a6450;
+    /* state (status rail + leds) */
+    --st-idle:#6a6450; --st-idle-bg:#cfccbd;
+    --st-busy:#b4540f; --st-busy-bg:#ffe3c4;
+    --st-ok:#1f7a35;   --st-ok-bg:#cdebd3;
+    --st-err:#b1311f;  --st-err-bg:#f4d3cd;
+    /* ─── spacing scale (use these, not magic numbers) ─── */
+    --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px;
+    /* ─── shape, control sizes, motion, elevation ─── */
+    --radius:8px; --r-sm:5px; --r-lg:12px;
+    --ctl-h:36px; --hero-h:46px; --ctl-sm:28px;
+    --gap:8px; --rail-w:252px; --hinge:26px;
+    --ring:0 0 0 3px rgba(255,122,60,.42);
+    --dur:.15s; --ease:cubic-bezier(.3,.7,.4,1);
+    --shadow-1:0 1px 2px rgba(0,0,0,.18); --shadow-2:0 8px 24px rgba(0,0,0,.42);
+  }
+  @media (prefers-reduced-motion: reduce){ :root{ --dur:0s; } }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font:14px/1.5 Verdana, Geneva, system-ui, sans-serif; color:var(--text);
+    background:
+      radial-gradient(circle at 12px 12px, rgba(255,255,255,.06) 1.5px, transparent 1.6px) 0 0/24px 24px,
+      linear-gradient(160deg,#1d6f6a,#15524e 60%,#123f3c);
+    min-height:100vh; padding:18px; }
+  .desk{ max-width:1100px; margin:0 auto; }
+  a{ color:#0a5; }
+  .muted{ color:var(--text-dim); font-size:12px; }
+  code{ background:#0002; padding:1px 5px; border-radius:3px; }
+
+  /* ── deskbar ── */
+  .deskbar{ display:flex; align-items:center; gap:10px; margin-bottom:14px; color:#eafffb; }
+  .deskbar .logo{ width:30px;height:30px;border-radius:6px;display:grid;place-items:center;
+    background:linear-gradient(#ff8a52,#c0461a); box-shadow:0 2px 0 #0006, inset 0 1px 0 #ffd9c4; font-size:18px; }
+  .deskbar h1{ font-size:20px; margin:0; letter-spacing:.5px; }
+  .deskbar .sub{ font-size:12px; opacity:.8; margin-left:2px; }
+
+  /* ── window chrome ── */
+  .win{ position:relative; background:var(--surface); border:2px solid;
+    border-color:var(--hi) var(--lo) var(--lo) var(--hi); box-shadow:0 8px 24px #0007; border-radius:3px; margin-bottom:16px; }
+
+  /* full-width tab strip — the tabs fill the whole app */
+  .tabbar{ display:flex; align-items:stretch; gap:4px; padding:6px 8px 0; }
+  .tabs{ display:flex; flex:1; gap:4px; }
+  .tab{ flex:1; text-align:center; font:700 13px Verdana,sans-serif; padding:9px 16px 8px; cursor:pointer; color:#4a4636;
+    background:#c4c0b1; border:2px solid; border-color:var(--hi) var(--lo) var(--surface) var(--hi);
+    border-bottom:none; border-radius:7px 7px 0 0; user-select:none; }
+  .tab.on{ background:var(--tab); color:#3a2a00; box-shadow:0 -2px 0 #0002; }
+  .iconbtn{ flex:0 0 auto; width:40px; display:grid; place-items:center; font-size:16px; cursor:pointer; color:#4a4636;
+    background:#c8c4b5; border:2px solid; border-color:var(--hi) var(--lo) var(--lo) var(--hi); border-radius:7px 7px 0 0; user-select:none; }
+  .iconbtn:hover{ filter:brightness(1.04); }
+  .iconbtn.on{ background:var(--tab); color:#3a2a00; }
+  .winbody{ border-top:2px solid var(--lo); padding:var(--s5); }
+
+  /* ── settings drawer (advanced; clean labeled form) ── */
+  .settings{ border-top:2px solid var(--bevel-lo); background:#cfccbd; padding:var(--s5); animation:drop var(--dur) var(--ease); }
+  .settings[hidden]{ display:none; }
+  @keyframes drop{ from{ opacity:0; transform:translateY(-6px); } to{ opacity:1; transform:none; } }
+  .settings__grid{ display:grid; grid-template-columns:1fr 1fr; gap:var(--s5); max-width:980px; }
+  .set-group{ display:flex; flex-direction:column; gap:var(--s3); }
+  .set-title{ font:700 11px Verdana,sans-serif; letter-spacing:.8px; text-transform:uppercase; color:var(--text-dim); margin:0; }
+  .field{ display:flex; flex-direction:column; gap:5px; }
+  .field>span{ font:600 11px Verdana,sans-serif; letter-spacing:.3px; text-transform:uppercase; color:var(--text-dim); }
+  .field>span em{ font-style:normal; opacity:.7; text-transform:none; letter-spacing:0; }
+  .field-row{ display:flex; gap:var(--s2); align-items:flex-end; flex-wrap:wrap; }
+  .field-row .field{ flex:1; min-width:160px; }
+  .lbl{ font-size:12px; color:var(--text-dim); }
+  @media (max-width:760px){ .settings__grid{ grid-template-columns:1fr; } }
+
+  /* ── app layout (shell) — 3 modes via body[data-layout] ── */
+  .layout{ display:grid; gap:var(--s5); grid-template-columns:var(--rail-w) minmax(0,1fr); align-items:start; }
+  .history{ grid-column:1; }
+  #paneInfer,#paneTrain{ grid-column:2; min-width:0; }
+
+  /* ── fields (ONE input system) ── */
+  input[type=text],input[type=password],select,textarea{ font:13px Verdana,sans-serif; color:var(--text);
+    background:#fbfaf4; border:2px solid; border-color:var(--bevel-lo) var(--bevel-hi) var(--bevel-hi) var(--bevel-lo); border-radius:var(--radius);
+    transition:box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+  input[type=text],input[type=password],select{ height:var(--ctl-h); padding:0 10px; }
+  input[type=text]{ flex:1; min-width:200px; }
+  input:focus-visible,select:focus-visible,textarea:focus-visible{ outline:none; box-shadow:var(--ring); border-color:var(--primary-edge); }
+  .w-narrow{ flex:0 0 120px; min-width:0; }
+  textarea{ width:100%; padding:9px 10px; font:13px ui-monospace,monospace; }
+  /* file inputs: tame the native chrome so they match the button system */
+  input[type=file]{ font:12px Verdana,sans-serif; color:var(--text-dim); max-width:100%; }
+  input[type=file]::file-selector-button{ font:700 12px Verdana,sans-serif; color:#2a2620; height:var(--ctl-sm); margin-right:10px;
+    padding:0 12px; cursor:pointer; border-radius:var(--r-sm); background:linear-gradient(var(--beige3),#cfcbbb);
+    border:2px solid; border-color:var(--bevel-hi) var(--bevel-lo) var(--bevel-lo) var(--bevel-hi); transition:filter var(--dur) var(--ease); }
+  input[type=file]::file-selector-button:hover{ filter:brightness(1.05); }
+
+  /* ── buttons (ONE system: base + primary / secondary / danger / ghost · sizes big / tiny) ── */
+  button,.btn{ --b1:var(--beige3); --b2:#cfcbbb; --bd-hi:var(--bevel-hi); --bd-lo:var(--bevel-lo); --fg:#2a2620;
+    appearance:none; font:700 13px/1 Verdana,sans-serif; color:var(--fg);
+    height:var(--ctl-h); padding:0 var(--s4); cursor:pointer; white-space:nowrap;
+    display:inline-flex; align-items:center; justify-content:center; gap:7px; border-radius:var(--radius);
+    background:linear-gradient(var(--b1),var(--b2)); border:2px solid; border-color:var(--bd-hi) var(--bd-lo) var(--bd-lo) var(--bd-hi);
+    transition:filter var(--dur) var(--ease), transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+  button:hover:not(:disabled),.btn:hover{ filter:brightness(1.05); }
+  button:active:not(:disabled),.btn:active{ transform:translateY(1px); filter:brightness(.96);
+    border-color:var(--bd-lo) var(--bd-hi) var(--bd-hi) var(--bd-lo); }
+  button:focus-visible,.btn:focus-visible{ outline:none; box-shadow:var(--ring); }
+  button:disabled{ opacity:.42; cursor:not-allowed; filter:saturate(.55); }
+  /* variants */
+  button.primary{ --b1:var(--primary-2); --b2:var(--primary); --fg:var(--on-primary); --bd-hi:#ffd9c4; --bd-lo:var(--primary-edge); }
+  button.secondary{ /* = neutral base, named for intent */ }
+  button.danger{ --b1:var(--danger-2); --b2:var(--danger); --fg:var(--on-danger); --bd-hi:#f6c3ba; --bd-lo:var(--danger-edge); }
+  button.ghost{ --b1:transparent; --b2:transparent; --bd-hi:transparent; --bd-lo:transparent; --fg:var(--text-dim); box-shadow:none; }
+  button.ghost:hover:not(:disabled){ filter:none; background:rgba(0,0,0,.05); color:var(--text); }
+  button.ghost:active:not(:disabled){ transform:translateY(1px); background:rgba(0,0,0,.08); }
+  /* sizes */
+  button.big{ height:var(--hero-h); padding:0 var(--s5); font-size:15px; border-radius:var(--r-lg); }
+  button.tiny{ height:var(--ctl-sm); padding:0 10px; font-size:11px; gap:5px; border-radius:var(--r-sm); }
+
+  /* ── section block ── */
+  .sec{ margin:var(--s5) 0; }
+  .sec:first-child{ margin-top:0; }
+  .sec[hidden]{ display:none; }
+  #askSection:not([hidden]){ animation:reveal .35s var(--ease); }
+  @keyframes reveal{ from{ opacity:0; transform:translateY(6px); } to{ opacity:1; transform:none; } }
+  .sec__title{ font:700 12px Verdana,sans-serif; letter-spacing:.8px; text-transform:uppercase; color:#5a5440; margin:0 0 var(--s3); }
+  .row{ display:flex; gap:var(--s2); align-items:center; flex-wrap:wrap; margin:var(--s3) 0; }
+
+  /* ── status rail (single info area) ── */
+  .rail{ background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:10px 12px; margin-bottom:6px; }
+  .rail__top{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .rail__chip{ font:700 11px ui-monospace,monospace; letter-spacing:.5px; text-transform:uppercase; padding:4px 10px; border-radius:999px;
+    display:inline-flex; align-items:center; gap:7px; white-space:nowrap; }
+  .rail__chip::before{ content:""; width:8px; height:8px; border-radius:50%; background:currentColor; box-shadow:0 0 6px currentColor; }
+  .rail[data-state=idle]  .rail__chip{ color:var(--st-idle); background:var(--st-idle-bg); }
+  .rail[data-state=busy]  .rail__chip{ color:var(--st-busy); background:var(--st-busy-bg); animation:pulse 1s ease-in-out infinite; }
+  .rail[data-state=ok]    .rail__chip,
+  .rail[data-state=tuned] .rail__chip{ color:var(--st-ok); background:var(--st-ok-bg); }
+  .rail[data-state=err]   .rail__chip{ color:var(--st-err); background:var(--st-err-bg); }
+  .rail__msg{ flex:1; min-width:180px; font:12px ui-monospace,monospace; color:#5a5440; white-space:pre-wrap; }
+  .rail__adapter{ display:flex; align-items:center; gap:6px; }
+  .rail__adapter[hidden]{ display:none; }
+  @keyframes pulse{ 50%{ opacity:.55; } }
+
+  /* ── history rail (left) ── */
+  .history{ background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:12px; align-self:stretch; }
+  .history__head{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom:8px; }
+  .history__head h2{ font:700 12px Verdana,sans-serif; letter-spacing:.6px; text-transform:uppercase; color:#5a5440; margin:0; }
+  .history__count{ font:11px ui-monospace,monospace; color:var(--text-dim); background:#cfccbd; padding:1px 7px; border-radius:999px; }
+  .history__list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; max-height:62vh; overflow:auto; }
+  .history__empty{ font:12px ui-monospace,monospace; color:var(--text-dim); padding:10px 4px; }
+  .hrun{ display:grid; grid-template-columns:auto 1fr; gap:8px 9px; padding:9px 10px; border-radius:var(--radius); cursor:pointer;
+    background:#fbfaf4; border:1px solid var(--line); transition:border-color .15s, box-shadow .15s; }
+  .hrun:hover{ border-color:#caa36e; }
+  .hrun.active{ border-color:var(--ember); box-shadow:0 0 0 2px #ff7a3c44; background:#fff6ee; }
+  .hrun__led{ width:10px; height:10px; border-radius:50%; margin-top:4px; background:var(--lo); box-shadow:0 0 5px currentColor; }
+  .hrun[data-kind=guided] .hrun__led{ color:#e2641a; background:#e2641a; }
+  .hrun[data-kind=own]    .hrun__led{ color:#1f7a35; background:#1f7a35; }
+  .hrun__name{ font:700 13px Verdana,sans-serif; color:#2a2620; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .hrun__meta{ grid-column:2; font:11px ui-monospace,monospace; color:var(--text-dim); }
+  .hrun__acts{ grid-column:1/3; display:flex; gap:6px; margin-top:4px; }
+  .hrun__acts button{ height:24px; padding:0 8px; font-size:11px; }
+
+  /* ── panels & output ── */
+  .panel{ background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:var(--s4); }
+  #guidedList{ margin:6px 0 0; padding-left:18px; font-size:12px; color:#3a382e; max-height:170px; overflow:auto; }
+  #guidedList li{ margin:4px 0; }
+  details.cfg{ margin:12px 0; border:1px solid var(--line); border-radius:var(--radius); background:#cfccbd55; }
+  details.cfg>summary{ cursor:pointer; list-style:none; padding:8px 12px; font:700 12px Verdana,sans-serif; color:var(--text-dim); user-select:none; }
+  details.cfg>summary::-webkit-details-marker{ display:none; }
+  details.cfg>summary::before{ content:"▸ "; color:#9a9480; }
+  details.cfg[open]>summary::before{ content:"▾ "; }
+  details.cfg[open]>summary{ border-bottom:1px solid var(--line); }
+  details.cfg .cfgbody{ padding:10px 12px; }
+  #out{ background:#0d1410; color:#d6ffe0; border:2px solid; border-color:var(--lo) var(--hi) var(--hi) var(--lo);
+    border-radius:var(--radius); padding:12px; white-space:pre-wrap; font:13px ui-monospace,monospace; min-height:140px; max-height:380px; overflow:auto; margin-top:8px; }
+  .stat{ font:12px ui-monospace,monospace; color:#5a5440; }
+
+  .done-banner{ display:none; margin-top:12px; padding:12px 14px; border-radius:var(--radius);
+    background:var(--st-ok-bg); border:1px solid #8fce9d; color:#1f5a30; align-items:center; gap:12px; flex-wrap:wrap; }
+  .done-banner b{ color:#16632b; }
+
+  /* ── inference lock overlay ── */
+  .lockwrap{ position:relative; }
+  #inferLock{ display:none; position:absolute; inset:0; background:#d8d4c5dd; z-index:5; border-radius:4px;
+    align-items:center; justify-content:center; text-align:center; font-weight:700; color:#5a4636; padding:20px; }
+
+  /* ── training activity bar ── */
+  #trainWidget{ display:none; margin:12px 0; }
+  .actbar{ height:14px; background:linear-gradient(#1d1206,#120b04); border:1px solid #5a3a18; border-radius:7px; overflow:hidden; box-shadow:inset 0 1px 3px rgba(0,0,0,.6); }
+  #trainBar{ height:100%; width:0%; background:linear-gradient(90deg,#7a2c00,#ff7a18,#ffc06a); background-size:200% 100%; box-shadow:0 0 12px rgba(255,130,40,.5); transition:width .25s ease; animation:bar-sheen 1.1s linear infinite; }
+  @keyframes bar-sheen{ to{ background-position:-200% 0; } }
+  #trainLabel{ font:12px ui-monospace,monospace; color:#5a5440; margin-top:6px; }
+  .trainMetrics{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin-top:10px; }
+  .trainMetrics[hidden]{ display:none; }
+  .tm{ background:#fbfaf4; border:1px solid var(--line); border-radius:var(--radius); padding:8px 9px; min-width:0; }
+  .tm b{ display:block; font:700 10px Verdana,sans-serif; letter-spacing:.4px; text-transform:uppercase; color:#8a8069; margin-bottom:3px; }
+  .tm span{ display:block; font:13px ui-monospace,monospace; color:#2e2a23; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lossSpark{ grid-column:1/-1; height:46px; background:#1a1208; border:1px solid #5a3a18; border-radius:var(--radius); padding:5px; }
+  .lossSpark svg{ width:100%; height:100%; display:block; }
+  .lossSpark polyline{ fill:none; stroke:#ff9b45; stroke-width:2; vector-effect:non-scaling-stroke; }
+  .maskPreview{ margin-top:12px; border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; background:#fbfaf4; }
+  .maskPreview[hidden]{ display:none; }
+  .maskPreview__head{ display:flex; justify-content:space-between; gap:10px; padding:8px 10px; border-bottom:1px solid var(--line); font:11px ui-monospace,monospace; color:#5a5440; }
+  .maskRows{ max-height:170px; overflow:auto; display:grid; grid-template-columns:52px 86px 1fr 1fr; font:11px ui-monospace,monospace; }
+  .maskRows div{ padding:5px 7px; border-bottom:1px solid #ded9ca; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:pre; }
+  .maskRows .hdr{ position:sticky; top:0; z-index:1; background:#ded9ca; color:#6c6250; font-weight:700; }
+  .maskRows .train{ background:#fff2df; color:#4f2607; font-weight:700; }
+  .maskRows .prompt{ color:#77705f; }
+  .maskRows .completion{ color:#184c25; }
+  .maskRows .eos{ color:#7a2c2c; }
+  @media (max-width:700px){ .trainMetrics{ grid-template-columns:repeat(2,minmax(0,1fr)); } .maskRows{ grid-template-columns:44px 74px 1fr; } .maskRows .target{ display:none; } }
+
+  /* ── step infographic + stopwatch ── */
+  .steps{ display:flex; gap:6px; flex-wrap:wrap; margin:10px 0 4px; }
+  .step{ flex:1; min-width:92px; text-align:center; font:600 11px Verdana,sans-serif; padding:8px 6px; border-radius:6px;
+    background:#cfccbd; color:#7a7563; border:2px solid; border-color:var(--hi) var(--lo) var(--lo) var(--hi); position:relative; transition:all .2s; }
+  .step.active{ background:linear-gradient(180deg,#ffa44e,#e2641a); color:#1c0f04; border-color:#ffc486; box-shadow:0 0 10px rgba(255,140,55,.5); }
+  .step.active::after{ content:"⏱"; position:absolute; top:-10px; right:-7px; font-size:15px; transform-origin:50% 60%; animation:tick .85s ease-in-out infinite; }
+  .step.done{ background:linear-gradient(180deg,#3fbf5a,#2a8a3e); color:#fff; border-color:#7be09a; }
+  .step.done::after{ content:"✓"; position:absolute; top:-9px; right:-5px; color:#bff7cc; font-weight:800; font-size:13px; }
+  #trainSteps .step.loop{ animation:stepglow 1.3s ease-in-out infinite; }
+  #trainSteps .step:nth-child(2).loop{ animation-delay:0s; }
+  #trainSteps .step:nth-child(3).loop{ animation-delay:.43s; }
+  #trainSteps .step:nth-child(4).loop{ animation-delay:.86s; }
+  @keyframes stepglow{ 0%,100%{ background:#cfccbd; color:#7a7563; box-shadow:none; } 45%{ background:linear-gradient(180deg,#ffa44e,#e2641a); color:#1c0f04; box-shadow:0 0 10px rgba(255,140,55,.5); } }
+  @keyframes tick{ 0%,100%{ transform:rotate(-13deg); } 50%{ transform:rotate(13deg); } }
+  .caption{ font:12px ui-monospace,monospace; color:#5a5440; min-height:16px; margin:4px 0 0; }
+  .clock{ display:none; font:700 12px ui-monospace,monospace; color:#e2641a; align-items:center; gap:5px; }
+  .clock.on{ display:inline-flex; }
+  .clock .sw{ display:inline-block; font-size:14px; transform-origin:50% 60%; animation:tick .85s ease-in-out infinite; }
+  .proc{ display:none; position:relative; height:6px; border-radius:4px; overflow:hidden; margin:8px 0 2px;
+    background:linear-gradient(#1d1206,#120b04); border:1px solid #5a3a18; }
+  .proc.on{ display:block; }
+  .proc::before{ content:""; position:absolute; top:0; bottom:0; left:-42%; width:42%; border-radius:4px;
+    background:linear-gradient(90deg,transparent,#ff7a18,#ffc06a,transparent); animation:proc-run 1.05s ease-in-out infinite; }
+  @keyframes proc-run{ to{ left:100%; } }
+  @media (prefers-reduced-motion: reduce){ .step.active::after,.clock .sw,.proc::before{ animation:none !important; } }
+
+  /* ── warehouse conveyor loader ── */
+  #warehouse{ display:none; margin-top:10px; }
+  #warehouse.on{ display:block; animation:wh-in .3s ease-out; }
+  @keyframes wh-in{ from{ opacity:0; transform:translateY(4px); } to{ opacity:1; transform:none; } }
+  .wh-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; font:12px ui-monospace,monospace; color:#9a8a72; }
+  .wh-head b{ color:#ff8a3c; font-variant-numeric:tabular-nums; }
+  #whEl{ margin-right:10px; color:#c79a6a; }
+  .wh-rail{ position:relative; height:36px; border-radius:9px; overflow:hidden;
+    background:linear-gradient(#1d1206,#120b04); border:1px solid #5a3a18; box-shadow:inset 0 1px 4px rgba(0,0,0,.7); }
+  .wh-rail .belt{ position:absolute; inset:0; opacity:.5;
+    background:repeating-linear-gradient(115deg, rgba(255,150,70,.0) 0 13px, rgba(255,150,70,.16) 13px 26px); animation:wh-belt .65s linear infinite; }
+  @keyframes wh-belt{ to{ background-position:26px 0; } }
+  .wh-rail .fill{ position:absolute; inset:0 auto 0 0; width:0%; transition:width .35s ease;
+    background:linear-gradient(90deg,#7a2c00,#ff7a18 55%,#ffc06a); box-shadow:0 0 16px rgba(255,130,40,.5); }
+  .wh-rail .fill::after{ content:""; position:absolute; top:0; bottom:0; right:0; width:2px; background:#ffe6c2; box-shadow:0 0 8px #ffb066; }
+  .wh-truck{ position:absolute; top:50%; left:0; transform:translate(-50%,-50%); font-size:20px; transition:left .35s ease; z-index:2; filter:drop-shadow(0 2px 2px rgba(0,0,0,.6)); }
+  .wh-truck span{ display:inline-block; animation:wh-bob .8s ease-in-out infinite; }
+  @keyframes wh-bob{ 0%,100%{ transform:scaleX(-1) translateY(0); } 50%{ transform:scaleX(-1) translateY(-2px); } }
+  .wh-label{ position:absolute; inset:0; display:flex; align-items:center; gap:9px; padding:0 12px; z-index:3;
+    font:11px ui-monospace,monospace; color:#fff1e0; text-shadow:0 1px 2px #000,0 0 3px #000; pointer-events:none; }
+  .wh-label .pk{ flex:0 0 auto; color:#ffd9a8; font-weight:700; letter-spacing:.5px; }
+  .wh-label .it{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .wh-label .ai{ flex:0 0 auto; color:#e0a96a; }
+  .wh-rail.done .belt{ animation:none; opacity:0; }
+  .wh-rail.done .fill{ width:100% !important; background:linear-gradient(90deg,#1c7a32,#46c25a); box-shadow:0 0 16px rgba(70,210,100,.45); }
+  .wh-rail.done .wh-truck{ left:100% !important; }
+  @media (prefers-reduced-motion: reduce){ #warehouse.on{ animation:none; } .wh-rail .belt,.wh-truck span{ animation:none !important; } }
+
+  .pane{ display:none; }
+  .pane.active{ display:block; }
+
+  /* ============================================================
+     LAYOUT MODE · MOBILE  (ground-up: single column; the history
+     rail becomes a horizontal swipe-strip of chips above content;
+     tabs already span full width; everything stacks & breathes)
+     ============================================================ */
+  body[data-layout=mobile]{ padding:10px; }
+  body[data-layout=mobile] .desk{ max-width:none; }
+  body[data-layout=mobile] .deskbar .sub{ display:none; }
+  body[data-layout=mobile] .layout{ grid-template-columns:1fr; gap:10px; }
+  body[data-layout=mobile] .history{ grid-column:1; order:-1; }
+  body[data-layout=mobile] .history__list{ flex-direction:row; max-height:none; overflow-x:auto; overflow-y:hidden; padding-bottom:4px; -webkit-overflow-scrolling:touch; }
+  body[data-layout=mobile] .hrun{ flex:0 0 200px; }
+  body[data-layout=mobile] #paneInfer,body[data-layout=mobile] #paneTrain{ grid-column:1; }
+  body[data-layout=mobile] .steps{ gap:5px; }
+  body[data-layout=mobile] .step{ min-width:0; flex:1 1 30%; font-size:10px; padding:6px 3px; }
+  body[data-layout=mobile] button.big{ width:100%; justify-content:center; }
+  body[data-layout=mobile] .winbody{ padding:12px; }
+
+  /* ============================================================
+     LAYOUT MODE · FOLDABLE (open)  (ground-up dual-pane: the two
+     screen segments each own a job. Left segment = your fine-tunes
+     + the Train console; right segment = live Inference. No tab
+     flipping — both are on screen, split across the hinge.)
+     ============================================================ */
+  body[data-layout=foldable] .desk{ max-width:none; }
+  body[data-layout=foldable] .tabs{ display:none; }            /* both panes show; tabs not needed */
+  body[data-layout=foldable] .tabbar{ justify-content:flex-end; }
+  body[data-layout=foldable] .tabbar::before{ content:"FOLDABLE · DUAL-PANE"; flex:1; align-self:center; padding-left:6px;
+    font:700 11px ui-monospace,monospace; letter-spacing:1px; color:#7a7563; }
+  body[data-layout=foldable] .layout{
+    grid-template-columns:minmax(0,1fr) var(--hinge) minmax(0,1fr);
+    grid-template-rows:auto auto; column-gap:0; }
+  body[data-layout=foldable] .history{ grid-column:1; grid-row:1; }
+  body[data-layout=foldable] #paneTrain{ grid-column:1; grid-row:2; display:block; padding-right:14px; }
+  body[data-layout=foldable] #paneInfer{ grid-column:3; grid-row:1/3; display:block; padding-left:14px; }
+  body[data-layout=foldable] .seg-divider{ display:block; }
+  /* the hinge gutter — a soft seam between the two panels */
+  body[data-layout=foldable] .layout::after{ content:""; grid-column:2; grid-row:1/3;
+    background:linear-gradient(#0000,#0001,#0000); border-left:1px dashed #0002; border-right:1px dashed #0002; }
+  .seg-divider{ display:none; }
+</style>
+</head>
+<body data-layout="desktop">
+<div class="desk">
+
+  <header class="deskbar">
+    <div class="logo">🜂</div>
+    <div>
+      <h1>VIBETHINKER · WEBGPU TRAIN + HOT-SWAP LoRA</h1>
+      <div class="sub">Train VibeThinker-3B in your browser — full WebGPU backward pass + AdamW over the int4 base — then hot-swap the LoRA into inference live. No server. No upload.</div>
+    </div>
+  </header>
+
+  <div class="win">
+    <div class="tabbar">
+      <div class="tabs">
+        <div class="tab on" id="tabInfer">▶ Inference</div>
+        <div class="tab" id="tabTrain">✦ Train (LoRA)</div>
+      </div>
+      <div class="iconbtn" id="gear" title="Model source, workspace &amp; settings" aria-label="Settings">⚙</div>
+    </div>
+
+    <!-- settings drawer: advanced model source + workspace folder -->
+    <div class="settings" id="settings" hidden>
+      <div class="settings__grid">
+        <div class="set-group">
+          <div class="set-title">Model source</div>
+          <label class="field"><span>Hugging Face repo</span>
+            <input id="hfRepo" type="text" value="WeiboAI/VibeThinker-3B" placeholder="owner/model"></label>
+          <label class="field"><span>HF token <em>(gated repos only)</em></span>
+            <input id="hfToken" type="password" placeholder="hf_…"></label>
+          <div class="field-row">
+            <label class="field"><span>Same-origin path</span>
+              <input id="modelUrl" type="text" value="" placeholder="/model (only if self-hosted)"></label>
+            <button id="load" class="secondary">Load from source</button>
+          </div>
+          <label class="field"><span>Local model folder</span>
+            <input id="modelFiles" type="file" webkitdirectory multiple></label>
+        </div>
+
+        <div class="set-group" id="fsBlock" hidden>
+          <div class="set-title">Workspace folder</div>
+          <p class="muted" id="fsStatus" style="margin:0">Not connected — import training text &amp; save adapters straight to a folder you pick.</p>
+          <div class="field-row">
+            <button id="fsConnect" class="secondary">📁 Connect a folder</button>
+            <button id="fsForget" class="ghost" hidden>Disconnect</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="winbody">
+      <div class="layout">
+
+        <!-- ───────────── HISTORY RAIL (left) ───────────── -->
+        <aside class="history">
+          <div class="history__head">
+            <h2>Your fine-tunes</h2>
+            <span class="history__count" id="historyCount">0</span>
+          </div>
+          <ul class="history__list" id="historyList"></ul>
+          <div class="history__empty" id="historyEmpty">No fine-tunes yet. Train one in the Train tab — every attempt is saved here automatically and survives reloads.</div>
+        </aside>
+
+        <!-- ───────────── INFERENCE PANE ───────────── -->
+        <section class="pane active" id="paneInfer">
+          <div class="lockwrap">
+            <div id="inferLock">⚙ Inference is paused while VibeThinker-3B is learning in the Train tab…</div>
+
+            <div class="rail" id="rail" data-state="idle">
+              <div class="rail__top">
+                <span class="rail__chip" id="railChip">Model not loaded</span>
+                <span class="rail__msg" id="railMsg">Press “Load VibeThinker-3B” to begin. First load streams the weights once, then it's cached.</span>
+                <span class="rail__adapter" id="adapterWrap" hidden>
+                  <span class="lbl">adapter</span>
+                  <select id="adapterSel"><option value="none">none (base)</option></select>
+                </span>
+              </div>
+              <div id="warehouse" aria-hidden="true">
+                <div class="wh-head"><span>🏗️ Assembling VibeThinker-3B on your GPU…</span><span><span id="whEl"></span><b class="wh-pct">0%</b></span></div>
+                <div class="wh-rail" id="whRail">
+                  <div class="belt"></div>
+                  <div class="fill" id="whFill"></div>
+                  <div class="wh-label"><span class="pk" id="whTag">▸ BUILDING</span><span class="it" id="whItem">spinning up the line…</span><span class="ai" id="whAisle">main aisle</span></div>
+                  <div class="wh-truck" id="whTruck"><span>🚚</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="sec">
+              <div class="sec__title">Step 1 · Install the model</div>
+              <div class="row">
+                <button id="loadHF" class="primary big">⤓ Load VibeThinker-3B</button>
+                <span class="muted">~6&nbsp;GB, one-time — streamed from Hugging Face &amp; cached in your browser. Other sources under&nbsp;⚙.</span>
+              </div>
+            </div>
+
+            <div class="sec" id="askSection" hidden>
+              <div class="sec__title">Step 2 · Ask it something</div>
+              <textarea id="prompt" rows="4" placeholder="Ask VibeThinker-3B anything… (⌘/Ctrl+Enter to run)">Who created Emberglass OS, and what language is it written in?</textarea>
+              <div class="row">
+                <button id="run" class="primary big" disabled>▶ Run</button>
+                <span class="clock" id="inferClock"><span class="sw">⏱</span><span class="t"></span></span>
+                <span class="stat" id="tokps"></span>
+              </div>
+              <div class="steps" id="inferSteps">
+                <div class="step" data-s="tok">① Tokenize</div>
+                <div class="step" data-s="prefill">② Read prompt (prefill KV)</div>
+                <div class="step" data-s="decode">③ Generate tokens</div>
+                <div class="step" data-s="done">✓ Answer</div>
+              </div>
+              <div class="proc" id="inferProc"></div>
+              <div class="caption" id="inferCap"></div>
+              <div id="out">—</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ───────────── TRAIN PANE ───────────── -->
+        <section class="pane" id="paneTrain">
+          <p class="muted" style="margin:0 0 var(--s4)">Fine-tune a LoRA adapter <b>entirely in this tab</b> — full backward pass + AdamW over the frozen int4 base. Every run saves to your fine-tunes and hot-swaps into Inference.</p>
+
+          <div class="panel">
+            <b>Teach it the “Emberglass OS handbook.”</b>
+            <p class="muted" style="margin:var(--s2) 0 var(--s3)">Made-up facts the base model can't know — right now it guesses or refuses. After ~30s of training it answers them correctly.</p>
+            <ul id="guidedList"></ul>
+          </div>
+          <div class="row" style="margin-top:var(--s4)"><button id="trainGuided" class="primary big" disabled>✦ Start training</button></div>
+
+          <details class="cfg">
+            <summary>Train on my own text instead</summary>
+            <div class="cfgbody">
+              <p class="muted" style="margin:0 0 var(--s3)">Drop a few <code>.txt</code>/<code>.md</code> files, paste notes, or pull a web page. We split it into short snippets and teach the model to <i>recall</i> them. Everything stays 100% local.</p>
+              <div class="field-row" style="align-items:flex-end">
+                <label class="field" style="flex:1"><span>Fetch a web page</span>
+                  <input id="ownUrl" type="text" placeholder="https://a-page-with-text…"></label>
+                <button id="ownFetch" class="secondary">Fetch page</button>
+              </div>
+              <div class="field-row" style="margin-top:var(--s3)">
+                <label class="field"><span>Local files</span>
+                  <input id="ownFiles" type="file" accept=".txt,.md,.json,.csv" multiple></label>
+                <button id="ownImportDir" class="secondary" hidden>📁 Import from folder</button>
+              </div>
+              <textarea id="ownText" rows="7" style="margin-top:var(--s3)" placeholder="…or paste text here. Guardrails: up to 12,000 chars / 24 snippets, capped steps — this is a fast demo, not a full training run."></textarea>
+              <div class="muted" id="ownStats" style="margin-top:var(--s2)"></div>
+              <div class="row" style="margin-top:var(--s4)"><button id="trainOwn" class="primary big" disabled>✦ Train on my data</button></div>
+            </div>
+          </details>
+
+          <div class="steps" id="trainSteps">
+            <div class="step" data-s="prep">① Build &amp; tokenize</div>
+            <div class="step" data-s="fwd">② Forward</div>
+            <div class="step" data-s="bwd">③ Backward (grads)</div>
+            <div class="step" data-s="opt">④ AdamW update</div>
+            <div class="step" data-s="swap">⑤ Hot-swap live</div>
+          </div>
+          <div class="caption" id="trainCap"></div>
+
+          <div id="trainWidget">
+            <div class="actbar"><div id="trainBar"></div></div>
+            <div class="row" style="margin:6px 0 0">
+              <span class="clock" id="trainClock"><span class="sw">⏱</span><span class="t"></span></span>
+              <span id="trainLabel"></span>
+            </div>
+            <div class="trainMetrics" id="trainMetrics" hidden>
+              <div class="tm"><b>loss</b><span id="tmLoss">—</span></div>
+              <div class="tm"><b>train tok/s</b><span id="tmTokps">—</span></div>
+              <div class="tm"><b>active labels</b><span id="tmActive">—</span></div>
+              <div class="tm"><b>optimizer</b><span id="tmOpt">—</span></div>
+              <div class="lossSpark"><svg id="lossSpark" viewBox="0 0 300 40" preserveAspectRatio="none"><polyline id="lossLine" points=""></polyline></svg></div>
+            </div>
+            <div class="maskPreview" id="maskPreview" hidden>
+              <div class="maskPreview__head"><b>loss mask preview</b><span id="maskSummary"></span></div>
+              <div class="maskRows" id="maskRows"></div>
+            </div>
+          </div>
+
+          <div id="tryIt" class="done-banner">
+            <span>✅ <b>Done.</b> The tuned adapter is live and saved to your fine-tunes. Open it in Inference.</span>
+            <button id="tryItBtn" class="primary">▶ Try it in Inference</button>
+            <button id="downloadAdapter" class="secondary" style="display:none">⬇ Download adapter (.safetensors)</button>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+
+  <div class="muted" style="color:#bfe; text-align:center">
+    In-browser WebGPU training · full backward + AdamW · runtime LoRA hot-swap. 🜂 ·
+    <a href="https://huggingface.co/WeiboAI/VibeThinker-3B" style="color:#cff">model</a> ·
+    <a href="https://github.com/maceip/vibethinker-webgpu-lora" style="color:#cff">source</a>
+  </div>
+</div>
+
+<script type="module" src="./bundle.js"></script>
+<script>
+/* Assembly-line loader, driven by the live status text in the rail (#railMsg). */
+(function () {
+  var wh = document.getElementById('warehouse'); if (!wh) return;
+  var statusEl = document.getElementById('railMsg');
+  var rail = document.getElementById('whRail'), fill = document.getElementById('whFill');
+  var pctEl = wh.querySelector('.wh-pct'), itemEl = document.getElementById('whItem');
+  var aisleEl = document.getElementById('whAisle'), truck = document.getElementById('whTruck');
+  var tagEl = document.getElementById('whTag');
+  var whEl = document.getElementById('whEl');
+  var active = false, shipT = null, t0 = 0, elTimer = null;
+  function startEl(){ if (elTimer) return; t0 = performance.now();
+    elTimer = setInterval(function(){ if (whEl) whEl.textContent = '⏱ ' + ((performance.now()-t0)/1000).toFixed(1) + 's'; }, 100); }
+  function stopEl(){ if (elTimer){ clearInterval(elTimer); elTimer = null; } }
+  function show(){ if(!wh.classList.contains('on')){ wh.classList.add('on'); wh.setAttribute('aria-hidden','false'); } }
+  function hide(){ wh.classList.remove('on'); wh.setAttribute('aria-hidden','true'); rail.classList.remove('done'); }
+  function prettyItem(t){
+    var m = t.match(/weights:\s*([^\s]+)/);
+    if (m && !/^(ready|streaming|workgroup|f16|timestamp|autotuning)$/i.test(m[1])) return m[1];
+    if (/tokenizer/i.test(t)) return 'tokenizer.json';
+    if (/autotun/i.test(t)) return 'calibrating the line (autotune)…';
+    if (/quantiz|streaming/i.test(t)) return 'streaming + quantizing to int4…';
+    if (/requesting WebGPU|WebGPU ready/i.test(t)) return 'powering up the GPU…';
+    return (t.replace(/\s*\d+%\s*$/, '').slice(0, 64)) || 'fetching…';
+  }
+  function aisleOf(name){
+    var m = name && name.match(/layers\.(\d+)/);
+    if (m) return 'aisle ' + ('0'+m[1]).slice(-2);
+    if (/embed/i.test(name)) return 'aisle 00 · intake';
+    if (/\bnorm\b/i.test(name)) return 'aisle 99 · QA';
+    return 'main aisle';
+  }
+  function update(){
+    var t = (statusEl.textContent || '').trim();
+    var pm = t.match(/(\d+)%/), p = pm ? Math.max(0,Math.min(100,+pm[1])) : null;
+    var done = /READY in/i.test(t) || p === 100;
+    var loadStart = /requesting WebGPU|loading tokenizer|streaming|weights:|quantiz|autotun/i.test(t);
+    if (loadStart && !done) { active = true; startEl(); rail.classList.remove('done'); if (tagEl) tagEl.textContent = '▸ BUILDING'; }
+    if (!active) { if (/^idle/i.test(t) || /press/i.test(t) || t === '') hide(); return; }
+    show();
+    var nm = prettyItem(t); itemEl.textContent = nm; aisleEl.textContent = aisleOf(nm);
+    if (p != null) {
+      fill.style.width = p + '%'; pctEl.textContent = p + '%';
+      truck.style.left = p + '%';
+    }
+    if (done) {
+      active = false; stopEl(); fill.style.width='100%'; pctEl.textContent='100%';
+      truck.style.left = '100%';
+      rail.classList.add('done');
+      if (tagEl) tagEl.textContent = '✓ ONLINE';
+      itemEl.textContent = 'assembled — running on your GPU'; aisleEl.textContent = 'online';
+      clearTimeout(shipT); shipT = setTimeout(hide, 2400);
+    }
+  }
+  new MutationObserver(update).observe(statusEl, { childList:true, subtree:true, characterData:true });
+  update();
+})();
+</script>
+</body>
+</html>

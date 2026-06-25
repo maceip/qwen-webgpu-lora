@@ -25,6 +25,7 @@
     "test:lora": "node esbuild.config.mjs --entry test/lora_validate.js --outfile test/lorav_bundle.js && node test/run_lorav.mjs",
     "test:app": "node test/run_app_e2e.mjs",
     "test:roundtrip": "node test/e2e_roundtrip.mjs",
+    "space:sync": "bash scripts/sync_space.sh",
     "test:prefill": "node esbuild.config.mjs --entry test/prefill_diff.js --outfile test/prefdiff_bundle.js && node test/run_prefdiff.mjs",
     "test:sampling": "node esbuild.config.mjs --entry test/sampling_wgpu.js --outfile test/sampling_bundle.js && node test/run_sampling.mjs",
     "test:topk-argmax": "node esbuild.config.mjs --entry test/topk_argmax_ties.js --outfile test/topk_argmax_ties_bundle.js && node test/run_topk_argmax_ties.mjs",
