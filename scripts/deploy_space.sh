@@ -34,9 +34,11 @@ git -C "$TMP" init -q
 git -C "$TMP" checkout -q -b main
 git -C "$TMP" add -A
 git -C "$TMP" -c user.email=deploy@local -c user.name=deploy commit -qm "Deploy VibeThinker WebGPU Space"
-git -C "$TMP" -c http.extraHeader="Authorization: Bearer $TOKEN" \
+# credentials provided via an in-memory helper (never written to config/URL/disk)
+HF_USER="$USER" HF_PASS="$TOKEN" GIT_TERMINAL_PROMPT=0 \
+  git -C "$TMP" -c credential.helper='!f(){ echo "username=$HF_USER"; echo "password=$HF_PASS"; };f' \
   push -f "https://huggingface.co/spaces/$REPO" main
 
 echo
 echo "✅ deployed: https://huggingface.co/spaces/$REPO"
-echo "   live app:  https://${USER//[._]/-}-${NAME//[._]/-}.hf.space"
+echo "   live app:  https://${USER//[._]/-}-${NAME//[._]/-}.static.hf.space"

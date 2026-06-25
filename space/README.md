@@ -9,7 +9,7 @@ pinned: false
 license: apache-2.0
 models:
   - WeiboAI/VibeThinker-3B
-short_description: In-browser WebGPU training + hot-swap LoRA for VibeThinker-3B
+short_description: In-browser WebGPU LoRA training + hot-swap (VibeThinker-3B)
 ---
 
 # VibeThinker-3B · in-browser WebGPU training + hot-swap LoRA
