@@ -1568,34 +1568,55 @@ export class QwenWGPU {
     }
   }
 
-  // Phase 5: GPU-resident sampling.
-  // Populates top-K on GPU (via existing machinery), then runs a tiny kernel that
-  // applies temperature, softmax + nucleus over the k candidates using a host-supplied
-  // uniform r, and writes exactly **one** token id. Only one u32 is read back.
-  // This is the first step toward eliminating large per-token host round-trips for sampling.
+  // Phase 5: GPU-resident sampling (pure-GPU top-k + sample chaining).
+  // Runs the iterative top-k selection dispatches directly into the GPU sampleIds/sampleVals
+  // buffers, then immediately chains the SAMPLE_TOPK kernel in the same submission.
+  // Only a single u32 (the chosen token) is ever read back from the GPU.
+  // This eliminates the previous k-value readbacks for the sampling path.
   async sampleToken(temp = 1.0, r = (typeof Math !== 'undefined' ? Math.random() : 0.5)) {
+    if (this._topKReadBusy) throw new Error('sampleToken: top-k selection already in flight');
+    this._topKReadBusy = true;
+
     const k = Math.min(this.samplingTopK, this.maxSamplingTopK, this.cfg.vocabSize);
-    // Populate the top-K buffers (current impl reads k values; future work can keep
-    // everything resident and chain directly into the sample kernel).
-    await this.topKLogits(k);
 
-    const enc = this.dev.createCommandEncoder();
-    const bg = this._bg(this.pipes.sampleTopK, [
-      this.s.sampleIds,
-      this.s.sampleVals,
-      this.s.sampled,
-    ]);
-    const immK = new Uint32Array([k]);
-    const immP = new Float32Array([temp > 0 ? temp : 1.0, Math.max(0, Math.min(1, r))]);
-    this._dispatch(enc, this.pipes.sampleTopK, bg, 1, 1, 'sampleTopK', [immK, immP]);
+    try {
+      // Build top-k directly on GPU (no mapAsync of the k entries).
+      const enc = this.dev.createCommandEncoder();
+      for (let i = 0; i < k; i++) {
+        const imm = new Uint32Array([this.cfg.vocabSize, i]);
+        this._dispatch(
+          enc,
+          this.pipes.topkSelect,
+          this._bgCached(this.pipes.topkSelect, [this.s.logits, this.s.sampleIds, this.s.sampleVals], `topk:${i}`),
+          1,
+          1,
+          'topk',
+          imm,
+        );
+      }
 
-    enc.copyBufferToBuffer(this.s.sampled, 0, this.sampledRead, 0, 4);
-    this.dev.queue.submit([enc.finish()]);
-    if (this.dev.queue.onSubmittedWorkDone) await this.dev.queue.onSubmittedWorkDone();
-    await this.sampledRead.mapAsync(GPUMapMode.READ);
-    const id = new Uint32Array(this.sampledRead.getMappedRange())[0];
-    this.sampledRead.unmap();
-    return id;
+      // Chain sampling on the just-populated GPU buffers (same encoder).
+      const bg = this._bg(this.pipes.sampleTopK, [
+        this.s.sampleIds,
+        this.s.sampleVals,
+        this.s.sampled,
+      ]);
+      const immK = new Uint32Array([k]);
+      const immP = new Float32Array([temp > 0 ? temp : 1.0, Math.max(0, Math.min(1, r))]);
+      this._dispatch(enc, this.pipes.sampleTopK, bg, 1, 1, 'sampleTopK', [immK, immP]);
+
+      // Only the final chosen id comes back.
+      enc.copyBufferToBuffer(this.s.sampled, 0, this.sampledRead, 0, 4);
+      this.dev.queue.submit([enc.finish()]);
+
+      if (this.dev.queue.onSubmittedWorkDone) await this.dev.queue.onSubmittedWorkDone();
+      await this.sampledRead.mapAsync(GPUMapMode.READ);
+      const id = new Uint32Array(this.sampledRead.getMappedRange())[0];
+      this.sampledRead.unmap();
+      return id;
+    } finally {
+      this._topKReadBusy = false;
+    }
   }
 
   // Run one token end-to-end (embed + step) and submit.

@@ -363,11 +363,21 @@ Next linear items (in order):
 - Small test harness update: f16 diff now also exercises sampling parity (fixed r) under both precisions.
 - Still 0 var<uniform>. Build clean.
 
+**Pure-GPU topK + sample chaining (this step):**
+- `sampleToken` no longer calls `topKLogits` (which forced readback of k ids+vals).
+- Instead it directly issues the k `TOPK_SELECT` dispatches into the GPU-resident `sampleIds`/`sampleVals` buffers, then immediately chains the `SAMPLE_TOPK` dispatch in the **same** `CommandEncoder`.
+- Only the final 1 u32 (`sampled`) is copied + read back.
+- One submission per sampled token for the selection+decision phase.
+- Achieves "fused topK-select + sample in one encoder (avoid the intermediate k-value readbacks)".
+- `topKLogits(k)` remains available for callers that need the actual list (debug, UI, etc.).
+- `generate(..., {sample:true})` now gets the full benefit automatically.
+
 Next linear (pick one on next continue):
-- Pure-GPU topK + sample chaining (keep selection + decision on device, read back only the final id).
-- Real hardware run of harness + sampling numbers.
-- Autotune improvements + auto-apply.
-- More Phase 5 (stop tokens on GPU, etc.).
+- Real hardware run of harness + sampling numbers + record results.
+- Autotune improvements + auto-apply at build time.
+- More Phase 5 (GPU stop token checks, Gumbel, etc.).
+- paged / prefill attention f16 variants if desired.
+- More overrides.
 
 ---
 
