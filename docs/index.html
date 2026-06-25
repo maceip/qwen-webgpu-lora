@@ -1,3 +1,17 @@
+<!--
+  ,;
+ \@@#\:          :/.        .:;;:
+_@@@@@@#+\|/!;;!-@@@--;    ,@@@@@;
+.!_*@@@@@@@@@@@@@@@@@@@;   |@@@@@\
+    .:!|+@@@@@##@@@@@@@#!  -@@@@@#,
+        .\@@@*;,\@@@@@@@@+,*@@@@@@+.
+    :*#@@@@@@@@@@@@@@-+@@@@@@@\@@@@-.
+    .#@@@@@#@@@@#*@@@+ /@@@@@@;\@@@@+.
+     ;\/:,  -@@@@;|@@@\ ,+@@@@!.+@@@@*:
+            ,@@@@#*@@@@@#+__!.  ,*@@@@@/
+             \##+_@@@@@@@@,      ,+@@@_:
+                  ;;,,..,:         !;.
+-->
 <!doctype html>
 <html lang="en">
 <head>
@@ -27,6 +41,50 @@
   .banner{ background:#1c1206; border:1px solid #4a3a1c; border-radius:9px; padding:12px 14px; font-size:13px; margin:14px 0; color:#e8dcc8; }
   a{ color:#ff9a64; }
   .foot{ margin-top:34px; color:#6b7280; font-size:12px; }
+
+  /* ── Zappos-style "picking your order from the warehouse" loader ── */
+  #warehouse{ display:none; margin:14px 0 4px; }
+  #warehouse.on{ display:block; animation:wh-in .35s ease-out; }
+  @keyframes wh-in{ from{ opacity:0; transform:translateY(6px); } to{ opacity:1; transform:none; } }
+  .wh-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; font-size:12px; color:#9aa4b2; }
+  .wh-head b{ color:#ffb37a; font-variant-numeric:tabular-nums; }
+  .wh-scene{ position:relative; height:188px; border:1px solid #3a2c1c; border-radius:11px; overflow:hidden;
+    background:radial-gradient(130% 90% at 50% -20%, #181b22 0%, #0b0d12 62%), #0b0d12;
+    box-shadow:inset 0 0 60px rgba(0,0,0,.6); }
+  .wh-shelves{ position:absolute; inset:12px 14px 60px; display:grid; grid-template-columns:repeat(8,1fr); grid-auto-rows:1fr; gap:7px; opacity:.6; }
+  .wh-crate{ border-radius:3px; background:linear-gradient(#352616,#241910); border:1px solid #4a3621; position:relative; transition:all .25s ease; }
+  .wh-crate::after{ content:""; position:absolute; left:20%; right:20%; top:46%; height:2px; background:rgba(255,170,90,.16); }
+  .wh-crate.lit{ background:linear-gradient(#7a531f,#4f3413); border-color:#ff9a4d; box-shadow:0 0 9px rgba(255,140,60,.5), inset 0 2px 0 rgba(255,205,150,.22); }
+  .wh-belt{ position:absolute; left:0; right:0; bottom:0; height:56px; background:#15171d; border-top:1px solid #2a2e38; overflow:hidden; }
+  .wh-belt::before{ content:""; position:absolute; inset:0; background:repeating-linear-gradient(90deg,#1b1e26 0 22px,#23272f 22px 44px); animation:wh-belt .55s linear infinite; }
+  @keyframes wh-belt{ to{ transform:translateX(-44px); } }
+  .wh-belt::after{ content:""; position:absolute; left:0; right:0; top:5px; height:2px; background:linear-gradient(90deg,transparent,rgba(255,122,60,.45),transparent); }
+  .wh-box{ position:absolute; bottom:18px; font-size:23px; filter:drop-shadow(0 3px 2px rgba(0,0,0,.55)); animation:wh-ride 3.1s linear infinite; }
+  @keyframes wh-ride{ from{ left:-9%; } to{ left:109%; } }
+  .wh-fork{ position:absolute; bottom:11px; left:0; font-size:30px; transition:transform .55s cubic-bezier(.4,.85,.3,1); will-change:transform; }
+  .wh-fork span{ display:inline-block; animation:wh-bob .85s ease-in-out infinite; }
+  @keyframes wh-bob{ 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-3px); } }
+  .wh-arm{ position:absolute; top:0; left:50%; width:3px; height:34px; background:linear-gradient(#5a4a30,#3a2e1c); transform-origin:top center; }
+  .wh-arm::after{ content:"📦"; position:absolute; left:-10px; bottom:-7px; font-size:17px; }
+  .wh-arm.pick{ animation:wh-pick 1.7s ease-in-out infinite; }
+  @keyframes wh-pick{ 0%,100%{ height:30px; } 50%{ height:74px; } }
+  .wh-ticket{ position:absolute; left:12px; right:12px; bottom:64px; display:flex; gap:9px; align-items:center;
+    font:12px ui-monospace,monospace; color:#e8dcc8; text-shadow:0 1px 2px #000; }
+  .wh-ticket .pk{ color:#ff8a52; font-weight:700; letter-spacing:.5px; flex:0 0 auto; }
+  .wh-item{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .wh-aisle{ flex:0 0 auto; color:#9aa4b2; }
+  .wh-prog{ height:8px; background:#241c16; border:1px solid #3a2c1c; border-radius:5px; overflow:hidden; margin-top:7px; }
+  .wh-fill{ height:100%; width:0%; background:linear-gradient(90deg,#b85a22,#ff9a4d); transition:width .4s ease; }
+  .wh-stamp{ position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    font:800 32px system-ui,sans-serif; color:#86f3a3; letter-spacing:3px; transform:rotate(-9deg);
+    text-shadow:0 0 20px rgba(90,255,150,.55); }
+  .wh-scene.shipped .wh-stamp{ display:flex; animation:wh-stamp .5s ease-out; }
+  .wh-scene.shipped .wh-belt::before, .wh-scene.shipped .wh-box{ animation-play-state:paused; }
+  @keyframes wh-stamp{ from{ transform:rotate(-9deg) scale(2.2); opacity:0; } to{ transform:rotate(-9deg) scale(1); opacity:1; } }
+  @media (prefers-reduced-motion: reduce){
+    #warehouse.on{ animation:none; }
+    .wh-belt::before,.wh-box,.wh-fork span,.wh-arm.pick{ animation:none !important; }
+  }
 </style>
 </head>
 <body>
@@ -60,6 +118,26 @@
   &nbsp;·&nbsp; or local folder (fully offline): <input id="modelFiles" type="file" webkitdirectory multiple style="font-size:12px"></div>
 <div id="status">idle — pick a model and load. The first load streams several GB from Hugging Face.</div>
 
+<div id="warehouse" aria-hidden="true">
+  <div class="wh-head"><span>📦 Picking your model from the warehouse…</span><b class="wh-pct">0%</b></div>
+  <div class="wh-scene">
+    <div class="wh-shelves" id="whShelves"></div>
+    <div class="wh-arm pick"></div>
+    <div class="wh-box" style="animation-delay:0s">📦</div>
+    <div class="wh-box" style="animation-delay:1.05s">🗃️</div>
+    <div class="wh-box" style="animation-delay:2.1s">📦</div>
+    <div class="wh-belt"></div>
+    <div class="wh-fork"><span>🚚</span></div>
+    <div class="wh-ticket">
+      <span class="pk">▸ PICKING</span>
+      <span class="wh-item" id="whItem">spinning up the forklift…</span>
+      <span class="wh-aisle" id="whAisle">main aisle</span>
+    </div>
+    <div class="wh-stamp">SHIPPED&nbsp;✓</div>
+  </div>
+  <div class="wh-prog"><div class="wh-fill" id="whFill"></div></div>
+</div>
+
 <h3>LoRA adapter (optional) — hot-swap live</h3>
 <div class="row">
   <select id="adapter"><option value="none">none (base)</option></select>
@@ -82,5 +160,84 @@ Asset: api.example.com. GET /api/v1/invoices/{id}/pdf returns any invoice with n
 <p class="foot">Built the hard way, on purpose. 🜂 &nbsp;·&nbsp; <a href="https://github.com/maceip/qwen-webgpu-lora">source</a> · <a href="https://huggingface.co/macmacmacmac/qwen-webgpu-lora">model card</a></p>
 
 <script type="module" src="./bundle.js"></script>
+<script>
+/* Drives the warehouse loader off the real #status text the engine emits while it
+   streams + quantizes weights. Only active during model load — stays hidden during
+   triage/generation. No dependency on the bundle; pure DOM observation. */
+(function () {
+  var wh = document.getElementById('warehouse');
+  if (!wh) return;
+  var statusEl = document.getElementById('status');
+  var scene = wh.querySelector('.wh-scene');
+  var fill = document.getElementById('whFill');
+  var pctEl = wh.querySelector('.wh-pct');
+  var itemEl = document.getElementById('whItem');
+  var aisleEl = document.getElementById('whAisle');
+  var fork = wh.querySelector('.wh-fork');
+  var shelves = document.getElementById('whShelves');
+
+  var crates = [];
+  for (var i = 0; i < 24; i++) { var c = document.createElement('div'); c.className = 'wh-crate'; shelves.appendChild(c); crates.push(c); }
+
+  var active = false, shipT = null;
+  function show() { if (!wh.classList.contains('on')) { wh.classList.add('on'); wh.setAttribute('aria-hidden', 'false'); } }
+  function hide() { wh.classList.remove('on'); wh.setAttribute('aria-hidden', 'true'); scene.classList.remove('shipped'); }
+
+  function prettyItem(t) {
+    var m = t.match(/weights:\s*([^\s]+)/);
+    if (m && !/^(ready|streaming|workgroup|f16|timestamp|autotuning)$/i.test(m[1])) return m[1];
+    if (/tokenizer/i.test(t)) return 'tokenizer.json';
+    if (/autotun/i.test(t)) return 'calibrating the forklift (autotune)…';
+    if (/quantiz|streaming/i.test(t)) return 'streaming + quantizing to int4…';
+    if (/requesting WebGPU|WebGPU ready/i.test(t)) return 'powering up the loading dock (WebGPU)…';
+    return (t.replace(/\s*\d+%\s*$/, '').slice(0, 64)) || 'picking…';
+  }
+  function aisleOf(name) {
+    var m = name && name.match(/layers\.(\d+)/);
+    if (m) return 'aisle ' + ('0' + m[1]).slice(-2);
+    if (/embed/i.test(name)) return 'aisle 00 · receiving';
+    if (/\bnorm\b/i.test(name)) return 'aisle 99 · QA';
+    return 'main aisle';
+  }
+
+  function update() {
+    var t = (statusEl.textContent || '').trim();
+    var pm = t.match(/(\d+)%/);
+    var p = pm ? Math.max(0, Math.min(100, +pm[1])) : null;
+    var done = /READY in/i.test(t) || p === 100;
+    var loadStart = /requesting WebGPU|loading tokenizer|streaming|weights:|quantiz|autotun/i.test(t);
+
+    if (loadStart && !done) active = true;
+    if (!active) { if (/^idle/i.test(t) || t === '') hide(); return; }
+
+    show();
+    var nm = prettyItem(t);
+    itemEl.textContent = nm;
+    aisleEl.textContent = aisleOf(nm);
+    if (p != null) {
+      fill.style.width = p + '%';
+      pctEl.textContent = p + '%';
+      var travel = Math.max(0, scene.clientWidth - 46);
+      fork.style.transform = 'translateX(' + (p * 0.01 * travel) + 'px)';
+      var n = Math.round(p / 100 * crates.length);
+      for (var i = 0; i < crates.length; i++) crates[i].classList.toggle('lit', i < n);
+    }
+    if (done) {
+      active = false;
+      fill.style.width = '100%'; pctEl.textContent = '100%';
+      fork.style.transform = 'translateX(' + Math.max(0, scene.clientWidth - 46) + 'px)';
+      for (var j = 0; j < crates.length; j++) crates[j].classList.add('lit');
+      itemEl.textContent = 'order complete — loaded onto your GPU';
+      aisleEl.textContent = 'shipped';
+      scene.classList.add('shipped');
+      clearTimeout(shipT);
+      shipT = setTimeout(hide, 2400);
+    }
+  }
+
+  new MutationObserver(update).observe(statusEl, { childList: true, subtree: true, characterData: true });
+  update();
+})();
+</script>
 </body>
 </html>
